@@ -65,3 +65,7 @@ D023 — Deployment boundary: server-only PostgreSQL access and private file dow
 ## 2026-10-06 — Private storage foundation
 
 Use official pinned Supabase SDK for server-side private Storage; keep existing server-managed password/session authentication. Persist attachment provider/bucket in migration 003 so changing defaults preserves historical storage locations. Require verified PostgreSQL TLS regardless of connection-string SSL overrides. External connections remain unverified until securely configured; see LIVE_SETUP.md.
+
+## Autonomous expansion — owner instruction
+
+The owner explicitly authorized completing the credential-independent master backlog, inspecting the real browser, maintaining docs and committing stable progress. Implement manual source flows with the same relational domain models as integrations. Separate economic recognition from canonical cash obligations. Store immutable COGS estimates and reconciliation revisions. Prepaid component allocations replace the original component only while costs are estimates; actual invoice totals remain authoritative. Inventory demand uses physical BOM components, with no inferred country-based fulfillment routing.

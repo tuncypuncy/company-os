@@ -36,6 +36,11 @@ export async function workspace(
     connections,
     credit,
     budgets,
+    snapshots,
+    poolAllocations,
+    refundEvents,
+    policy,
+    operating,
   ] = await Promise.all([
     db.query<{
       id: string;
@@ -63,6 +68,9 @@ export async function workspace(
       processing_minor: string;
       currency: string;
       source: string;
+      customer_country: string;
+      supplier_id: string;
+      supplier_batch: string;
     }>(
       "SELECT * FROM orders WHERE store_id=$1 AND currency=$2 AND ordered_at>=$3 AND ordered_at<=$4 AND ($5::text IS NULL OR legal_entity_id=$5) ORDER BY ordered_at",
       [storeId, currency, start.toISOString(), asOf, entityId ?? null],
@@ -73,6 +81,7 @@ export async function workspace(
       product_id: string;
       quantity: number;
       bundle_quantity: number;
+      sku: string;
     }>(
       "SELECT i.* FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.store_id=$1 AND o.currency=$2 AND o.ordered_at>=$3 AND o.ordered_at<=$4 AND ($5::text IS NULL OR o.legal_entity_id=$5)",
       [storeId, currency, start.toISOString(), asOf, entityId ?? null],
@@ -175,6 +184,47 @@ export async function workspace(
       "SELECT b.daily_minor FROM ad_budgets b JOIN ad_accounts a ON a.id=b.account_id WHERE a.store_id=$1 AND a.platform=$2 AND a.currency=$3 AND ($4::text IS NULL OR a.legal_entity_id=$4) ORDER BY b.effective_at DESC LIMIT 1",
       [storeId, "META", currency, entityId ?? null],
     ),
+    db.query<{
+      order_item_id: string;
+      estimated_minor: string;
+      actual_minor: string | null;
+      cost_rule_id: string;
+      rule_version: number;
+      components: Record<string, number>;
+    }>(
+      "SELECT c.* FROM order_costs c JOIN order_items i ON i.id=c.order_item_id JOIN orders o ON o.id=i.order_id WHERE o.store_id=$1 AND o.currency=$2 AND c.superseded_at IS NULL",
+      [storeId, currency],
+    ),
+    db.query<{
+      order_item_id: string;
+      allocated_minor: string;
+      component: string;
+    }>(
+      "SELECT c.*,p.component FROM prepaid_consumption c JOIN prepaid_cost_pools p ON p.id=c.pool_id WHERE p.store_id=$1 AND p.currency=$2",
+      [storeId, currency],
+    ),
+    db.query<{
+      order_id: string;
+      recovered_cogs_minor: string;
+      fee_impact_minor: string;
+    }>(
+      "SELECT r.* FROM refunds r JOIN orders o ON o.id=r.order_id WHERE o.store_id=$1 AND o.currency=$2",
+      [storeId, currency],
+    ),
+    db.query<{ safety_buffer_minor: string | null; refund_policy: string }>(
+      "SELECT * FROM workspace_settings WHERE store_id=$1 AND currency=$2",
+      [storeId, currency],
+    ),
+    db.query<{ amount_minor: string }>(
+      "SELECT amount_minor FROM expenses WHERE store_id=$1 AND currency=$2 AND recognition='OPERATING' AND recognized_date>=$3 AND recognized_date<=$4 AND ($5::text IS NULL OR legal_entity_id=$5)",
+      [
+        storeId,
+        currency,
+        start.toISOString().slice(0, 10),
+        today,
+        entityId ?? null,
+      ],
+    ),
   ]);
   const typedRules = rules.rows.map((r) => ({
     ...r,
@@ -190,17 +240,65 @@ export async function workspace(
   }));
   const costs = items.rows.map((item) => {
     const order = orders.rows.find((o) => o.id === item.order_id)!;
+    const computed = orderCost(typedRules, {
+      productId: item.product_id,
+      storeId,
+      entityId: order.legal_entity_id,
+      quantity: item.quantity,
+      bundleQuantity: item.bundle_quantity,
+      date: new Date(order.ordered_at).toISOString().slice(0, 10),
+      currency,
+      sku: item.sku,
+      country: order.customer_country,
+      supplierId: order.supplier_id,
+      batch: order.supplier_batch,
+    });
+    const snapshot = snapshots.rows.find((c) => c.order_item_id === item.id);
+    let value = snapshot
+      ? integer(snapshot.actual_minor ?? snapshot.estimated_minor)
+      : computed.total;
+    const allocations = poolAllocations.rows.filter(
+      (c) => c.order_item_id === item.id,
+    );
+    if (
+      value !== null &&
+      allocations.length &&
+      snapshot?.actual_minor == null
+    ) {
+      const rule = typedRules.find(
+        (r) => r.id === (snapshot?.cost_rule_id ?? computed.ruleId),
+      );
+      for (const allocation of allocations) {
+        const component =
+          snapshot?.components?.[allocation.component] ??
+          (rule
+            ? (integer(
+                rule[(allocation.component + "_minor") as keyof CostRule],
+              ) *
+                item.quantity) /
+              item.bundle_quantity
+            : null);
+        if (component === null) {
+          value = null;
+          break;
+        }
+        value = value - component + integer(allocation.allocated_minor);
+      }
+    }
     return {
       ...item,
-      ...orderCost(typedRules, {
-        productId: item.product_id,
-        storeId,
-        entityId: order.legal_entity_id,
-        quantity: item.quantity,
-        bundleQuantity: item.bundle_quantity,
-        date: new Date(order.ordered_at).toISOString().slice(0, 10),
-        currency,
-      }),
+      ...computed,
+      total: value,
+      estimated: snapshot ? integer(snapshot.estimated_minor) : computed.total,
+      actual:
+        snapshot?.actual_minor == null ? null : integer(snapshot.actual_minor),
+      ruleId: snapshot?.cost_rule_id ?? computed.ruleId,
+      status:
+        snapshot?.actual_minor != null
+          ? "RECONCILED"
+          : allocations.length
+            ? "PREPAID_ALLOCATED"
+            : computed.status,
     };
   });
   const total = (values: unknown[]) =>
@@ -209,17 +307,28 @@ export async function workspace(
   const missingRefunds = orders.rows.filter(
     (o) => o.internal_refund_minor === null,
   ).length;
+  const reviewedPolicy = policy.rows[0]?.refund_policy === "INTERNAL_REVIEWED";
+  const selectedRefund = (o: (typeof orders.rows)[number]) =>
+    reviewedPolicy
+      ? (o.internal_refund_minor ?? o.platform_refund_minor)
+      : o.platform_refund_minor;
+  const recovery = total(
+    refundEvents.rows
+      .filter((r) => orders.rows.some((o) => o.id === r.order_id))
+      .map((r) => r.recovered_cogs_minor ?? 0),
+  );
+  const extraFees = total(
+    refundEvents.rows
+      .filter((r) => orders.rows.some((o) => o.id === r.order_id))
+      .map((r) => r.fee_impact_minor ?? 0),
+  );
   const metrics = profitability({
     gross: total(orders.rows.map((o) => o.gross_minor)),
     discounts: total(orders.rows.map((o) => o.discount_minor)),
-    refunds: total(
-      orders.rows.map(
-        (o) => o.internal_refund_minor ?? o.platform_refund_minor,
-      ),
-    ),
-    fees: total(orders.rows.map((o) => o.processing_minor)),
+    refunds: total(orders.rows.map((o) => selectedRefund(o))),
+    fees: total(orders.rows.map((o) => o.processing_minor)) + extraFees,
     ads: total(ads.rows.map((a) => a.actual_minor)),
-    cogs: missing ? null : total(costs.map((c) => c.total)),
+    cogs: missing ? null : total(costs.map((c) => c.total)) - recovery,
   });
   const opening = balances.rows.length
     ? total(balances.rows.map((b) => b.available_minor))
@@ -254,7 +363,12 @@ export async function workspace(
         }
       : cashForecast({
           opening,
-          buffer: appMode() === "demo" ? 8000000 : 0,
+          buffer:
+            policy.rows[0]?.safety_buffer_minor != null
+              ? integer(policy.rows[0].safety_buffer_minor)
+              : appMode() === "demo"
+                ? 8000000
+                : 0,
           currency,
           asOf,
           hours,
@@ -281,7 +395,7 @@ export async function workspace(
             (o) =>
               integer(o.gross_minor) -
               integer(o.discount_minor) -
-              integer(o.internal_refund_minor ?? o.platform_refund_minor),
+              integer(selectedRefund(o)),
           ),
         ) / 100,
       cogs: dailyCosts.some((c) => c.total === null)
@@ -317,14 +431,20 @@ export async function workspace(
       net: orders.rows.length ? metrics.net : null,
       profit: orders.rows.length ? metrics.profit : null,
       margin: orders.rows.length ? metrics.margin : null,
-      cogs: missing || !costs.length ? null : total(costs.map((c) => c.total)),
+      cogs:
+        missing || !costs.length
+          ? null
+          : total(costs.map((c) => c.total)) - recovery,
       ads: ads.rows.length ? total(ads.rows.map((a) => a.actual_minor)) : null,
-      refunds: total(
-        orders.rows.map(
-          (o) => o.internal_refund_minor ?? o.platform_refund_minor,
-        ),
-      ),
+      refunds: total(orders.rows.map((o) => selectedRefund(o))),
       fees: total(orders.rows.map((o) => o.processing_minor)),
+      operatingExpenses: total(operating.rows.map((r) => r.amount_minor)),
+      operatingProfit:
+        metrics.profit === null
+          ? null
+          : metrics.profit - total(operating.rows.map((r) => r.amount_minor)),
+      refundsRecoveredCogs: recovery,
+      refundPolicy: reviewedPolicy ? "INTERNAL_REVIEWED" : "PLATFORM",
       orders: orders.rows.length,
       missingCosts: missing,
       missingRefunds,
@@ -336,7 +456,8 @@ export async function workspace(
       opening,
       balances: balances.rows,
       forecasts,
-      bufferConfigured: appMode() === "demo",
+      bufferConfigured:
+        appMode() === "demo" || policy.rows[0]?.safety_buffer_minor != null,
     },
     obligations: obligations.rows.filter(
       (o) =>

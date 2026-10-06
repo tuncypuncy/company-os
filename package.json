@@ -12,7 +12,8 @@
     "user:create": "tsx scripts/create-user.ts",
     "test:smoke": "node scripts/smoke.mjs",
     "format": "prettier --write src scripts tests next.config.ts tsconfig.json package.json",
-    "live:check": "tsx scripts/live-check.ts"
+    "live:check": "tsx scripts/live-check.ts",
+    "integrations:sync": "tsx scripts/sync-integrations.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",

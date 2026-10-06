@@ -37,6 +37,10 @@ import {
 import type { User } from "@/lib/auth";
 import type { Workspace } from "@/lib/workspace";
 
+import { ConnectionSettings } from "./connection-settings";
+import { DecisionSimulator } from "./decision-simulator";
+import { AuditView } from "./audit-view";
+import { OperationsPanel } from "./operations-panel";
 import { api, Badge, type View } from "./workspace-ui";
 import {
   Overview,
@@ -60,6 +64,10 @@ const nav = [
   ["invoices", "Invoice center", Receipt],
   ["scale", "Can we scale?", SlidersHorizontal],
   ["inventory", "Inventory & supply", Boxes],
+  ["expenses", "Expenses & payroll", CalendarDays],
+  ["prepaid", "Prepaid pools", Boxes],
+  ["meta", "Meta billing", Activity],
+  ["audit", "Audit & lineage", ShieldCheck],
   ["integrations", "Connections", Plug],
 ] as const;
 export function WorkspaceApp({
@@ -263,6 +271,10 @@ export function WorkspaceApp({
               <h1>
                 {
                   {
+                    expenses: "Every cost under control.",
+                    prepaid: "Turn upfront costs into clarity.",
+                    meta: "Keep your credit moving.",
+                    audit: "Follow the financial trail.",
                     overview: "Your business. In focus.",
                     invoices: "From invoice to insight.",
                     costs: "The real cost of every order.",
@@ -276,6 +288,10 @@ export function WorkspaceApp({
               <p>
                 {
                   {
+                    expenses: "Contracts, recognition, payroll and renewals.",
+                    prepaid: "Consumption, remaining value and payment timing.",
+                    meta: "Credit headroom, payment stages and cash-aware suggestions.",
+                    audit: "Source evidence, revisions and responsible actors.",
                     overview:
                       "Your economics, cash and next decisions. All in one place.",
                     invoices:
@@ -387,7 +403,17 @@ export function WorkspaceApp({
                 {view === "invoices" && (
                   <InvoiceList data={data} onAdd={() => setModal("invoice")} />
                 )}
-                {view === "costs" && <Costs data={data} />}
+                {view === "costs" && (
+                  <>
+                    <Costs data={data} />
+                    <OperationsPanel
+                      section="commerce"
+                      data={data}
+                      user={user}
+                      onRefresh={refresh}
+                    />
+                  </>
+                )}
                 {view === "cash" && (
                   <Cash
                     data={data}
@@ -397,9 +423,37 @@ export function WorkspaceApp({
                     onBalance={() => setModal("balance")}
                   />
                 )}
-                {view === "scale" && <Scale data={data} />}
-                {view === "inventory" && <Inventory data={data} />}
-                {view === "integrations" && <Connections data={data} />}
+                {view === "cash" && (
+                  <OperationsPanel
+                    section="cash"
+                    data={data}
+                    user={user}
+                    onRefresh={refresh}
+                  />
+                )}
+                {view === "scale" && (
+                  <DecisionSimulator data={data} user={user} />
+                )}
+                {view === "audit" && <AuditView user={user} />}
+                {view === "inventory" && (
+                  <OperationsPanel
+                    section="inventory"
+                    data={data}
+                    user={user}
+                    onRefresh={refresh}
+                  />
+                )}
+                {["expenses", "prepaid", "meta"].includes(view) && (
+                  <OperationsPanel
+                    section={view}
+                    data={data}
+                    user={user}
+                    onRefresh={refresh}
+                  />
+                )}
+                {view === "integrations" && (
+                  <ConnectionSettings data={data} user={user} />
+                )}
                 <footer className="main-footer">
                   <span>
                     Company OS <span className="footer-slash">/</span> Built for

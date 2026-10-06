@@ -35,6 +35,9 @@ export async function migrate(db: Database) {
     "001_foundation",
     "002_organization",
     "003_private_storage",
+    "004_operations",
+    "005_inventory",
+    "006_reporting",
   ]) {
     const exists = await db.query(
       "SELECT version FROM schema_migrations WHERE version=$1",

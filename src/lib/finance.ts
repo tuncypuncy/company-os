@@ -33,6 +33,10 @@ export type CostRule = {
   effective_end: string | null;
   version: number;
   status: string;
+  sku?: string | null;
+  country?: string | null;
+  supplier_id?: string | null;
+  batch?: string | null;
 };
 export function orderCost(
   rules: CostRule[],
@@ -44,6 +48,10 @@ export function orderCost(
     bundleQuantity: number;
     date: string;
     currency: string;
+    sku?: string | null;
+    country?: string | null;
+    supplierId?: string | null;
+    batch?: string | null;
   },
 ) {
   if (
@@ -52,16 +60,24 @@ export function orderCost(
     input.quantity % input.bundleQuantity !== 0
   )
     throw new Error("Quantity must be an exact multiple of the bundle size");
-  const matches = rules.filter(
+  const eligible = rules.filter(
     (r) =>
       r.product_id === input.productId &&
       r.store_id === input.storeId &&
       r.legal_entity_id === input.entityId &&
       r.bundle_quantity === input.bundleQuantity &&
       r.currency === input.currency &&
+      (!r.sku || r.sku === input.sku) &&
+      (!r.country || r.country === input.country) &&
+      (!r.supplier_id || r.supplier_id === input.supplierId) &&
+      (!r.batch || r.batch === input.batch) &&
       r.effective_start <= input.date &&
       (!r.effective_end || input.date < r.effective_end),
   );
+  const score = (r: CostRule) =>
+    [r.sku, r.country, r.supplier_id, r.batch].filter(Boolean).length;
+  const specificity = Math.max(-1, ...eligible.map(score));
+  const matches = eligible.filter((r) => score(r) === specificity);
   if (matches.length !== 1)
     return {
       status: matches.length ? "AMBIGUOUS" : "UNMAPPED",

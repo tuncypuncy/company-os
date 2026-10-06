@@ -7,7 +7,11 @@ export type View =
   | "cash"
   | "scale"
   | "inventory"
-  | "integrations";
+  | "integrations"
+  | "expenses"
+  | "prepaid"
+  | "meta"
+  | "audit";
 export function amount(n: unknown, currency = "USD") {
   return n === null || n === undefined
     ? "Unavailable"

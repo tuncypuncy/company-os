@@ -74,3 +74,7 @@ See [validation evidence and screenshots](docs/VALIDATION.md) for the current ve
 ## Live connection setup
 
 See [docs/LIVE_SETUP.md](docs/LIVE_SETUP.md) for verified-TLS PostgreSQL, real owner/operations account provisioning, private Supabase Storage and `npm run live:check`. Storage implementation is tested with a fictional SDK contract; no external project has been connected.
+
+## Operational expansion
+
+The finance and inventory workspaces now provide real manual entry, recurring expense generation, reviewed refunds/reconciliation, prepaid consumption, payroll/owner schedules, physical SKU/BOM inventory, inbound tracking, Meta billing and combined scaling decisions. Read [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for the exact boundary. Demo/manual/API records use the same relational models; external connections remain unverified.

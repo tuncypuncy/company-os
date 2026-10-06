@@ -21,7 +21,7 @@ Never invent business facts, prices, balances, tax treatment, mappings, lead tim
 ## Development rules
 
 - Use the existing isolated checkout; do not create a Git worktree unless the owner requests one.
-- Build working vertical slices. The long-term specification is not an instruction to implement every module in one task.
+- Build working vertical slices. The owner has now authorized autonomous execution of the entire credential-independent backlog. Continue through tested vertical slices and commit stable progress; missing external credentials must not stop independent modules.
 - Design relational models and migrations before extensive UI. Preferred stack: Next.js, TypeScript, PostgreSQL/Supabase, Tailwind, shadcn/ui where useful, Recharts; Vercel-compatible.
 - Consult FINANCIAL_RULES.md before calculations. Preserve historical rule versions, estimates, actuals, source records, and override history. Never silently overwrite financial truth.
 - Never infer legal entity or store from customer geography. Both Godisabove stores sell globally.
@@ -37,3 +37,5 @@ Never invent business facts, prices, balances, tax treatment, mappings, lead tim
 The application now has migrations, persistent demo PostgreSQL, sessions, a themed dashboard, manual invoices/payments/balances, COGS/cash calculations and a simplified scaling calculator. Read README.md for commands and explicit limitations. Integrations and AI extraction are not live. `company_os` is an isolated database schema; never expose it directly to anonymous Supabase/browser clients. Use one process per PGlite data directory.
 
 Current Next.js ships local version-specific guidance in `node_modules/next/dist/docs/`. Consult it when changing framework APIs. `agentRules: false` prevents the dev server from rewriting this file.
+
+Read docs/IMPLEMENTATION_STATUS.md before autonomous backlog work. Current operation definitions, validated transaction service, inventory/cash/Meta engines and integration contracts are implemented; do not replace working flows with placeholder cards. Commit reviewed source changes, not .data, credentials, build caches or temporary TLS fixtures. Native fixture validation is isolated from real books.
