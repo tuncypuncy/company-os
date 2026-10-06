@@ -114,7 +114,7 @@ export async function ingestShopifyOrder(
   }, 0);
   await rawSource(tx, c.id, "ORDER", order.id, order);
   await tx.query(
-    "INSERT INTO orders(id,store_id,legal_entity_id,external_id,ordered_at,currency,gross_minor,discount_minor,platform_refund_minor,source,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'SHOPIFY',$10) ON CONFLICT(store_id,external_id) DO UPDATE SET gross_minor=EXCLUDED.gross_minor,discount_minor=EXCLUDED.discount_minor,platform_refund_minor=EXCLUDED.platform_refund_minor,status=EXCLUDED.status",
+    "INSERT INTO orders(id,store_id,legal_entity_id,external_id,ordered_at,currency,gross_minor,discount_minor,platform_refund_minor,source,status,financial_status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'SHOPIFY',$10,$11) ON CONFLICT(store_id,external_id) DO UPDATE SET gross_minor=EXCLUDED.gross_minor,discount_minor=EXCLUDED.discount_minor,platform_refund_minor=EXCLUDED.platform_refund_minor,status=EXCLUDED.status,financial_status=EXCLUDED.financial_status",
     [
       id,
       c.store_id,
@@ -126,6 +126,7 @@ export async function ingestShopifyOrder(
       discount,
       platformRefund,
       order.cancelledAt ? "CANCELLED" : "PLATFORM_REPORTED",
+      order.displayFinancialStatus || "UNKNOWN",
     ],
   );
   for (const line of order.lineItems.nodes) {

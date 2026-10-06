@@ -33,7 +33,6 @@ export function ConnectionSettings({
     try {
       const r = await api("/api/connections?store=" + data.storeId);
       setConnections(r.connections);
-      setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Connection load failed");
     }

@@ -101,15 +101,17 @@ Compare baseline and proposed Meta/Google spend using disclosed ROAS/revenue, pr
 
 Present separate financial/cash, Meta credit, and inventory risks with explanations; do not declare safe scaling when material inputs are missing. Alerts cover credit, cash shortfall, due/overdue obligations, unexpected expense, COGS/refund changes, low prepaid/stock, inbound delay/stockout, unmapped SKUs, and failed/stale syncs. Include severity, affected object, reason, timestamp and suggested action. Start with in-app notifications.
 
-## V0.1 implementation boundary — 2026-10-06
+## Implemented boundary — 2026-10-06
 
-Money uses safe integer minor units and supports USD/EUR/GBP (two decimal places). Simple rules match product/store/entity/bundle/currency/date with exclusive ends. Supplier/SKU/country/batch precedence and historical rule revisions are not implemented; ambiguous matches are rejected. Effective dates returned by database drivers are normalized before rule matching. Invoice line quantity means number of priced bundles; physical quantity is bundles × bundle size. Cost rules are optional at invoice confirmation; overlaps reject the whole posting transaction. Invoice-to-order actual-cost allocation remains future work.
+Amounts use safe integer minor units for USD/EUR/GBP. Effective rules match canonical product/store/entity/bundle/currency and optional SKU/country/supplier/batch, preferring unique greatest specificity; ties fail closed. Exclusive ends preserve history. Saved estimates include rule version, components and input snapshot. Reconciliation revisions preserve estimates and enforce invoice allocation control totals.
 
-Cash includes scheduled company liabilities, including overdue outstanding obligations, once each; paid/personal items are excluded. Source balance timestamps are displayed. Demo safety buffer is illustrative; live buffer configuration and FX totals are unavailable. Manual snapshots are not adjusted automatically when recording a payment; refresh them explicitly. Currency and entity filters are strict.
+Prepaid cumulative integer allocation exhausts exactly. Consumption replaces the selected estimated component; complete reconciled actual totals remain authoritative and must include the appropriate prepaid treatment. Reviewed refunds preserve platform evidence, use idempotent event identities, retain override audit history, and cap recovery at recorded order cost. Imported platform cash refunds require reviewed net basis; unavailable processing fees/ad coverage/costs block definitive profit.
 
-Scaling is a simplified estimated model with editable Meta budget, ROAS, COGS percent and settlement delay; refunds 2% and fees 3.5% are visible illustrative assumptions. It reports incremental ad accrual and estimated settlements separately. Exact incremental cash funding, inventory capacity and a safe-to-scale recommendation are intentionally unavailable without payment/inbound/clearing inputs.
+Cash includes remaining company liabilities after partial payments, overdue obligations and dated expected inflows once each. Payments do not automatically change bank snapshots. No cross-company transfers or cross-currency netting are inferred. Live buffer/funding surplus is unavailable until an explicit buffer exists. Original currencies remain separate; direct sourced FX conversions show rate/time and remain unavailable for missing rates.
 
-Prepaid/inventory/supply-chain/reconciliation records have schema support, but their full engines and UI workflows are not implemented. Tax/payroll/owner inputs are generic manual obligations, not tax or salary calculation engines.
+Meta credit links its own account budget, requires reviewed credit/clearing snapshots, and never treats API spend cap as a credit facility. Incomplete ad-set budget coverage is not published as zero. Combined scale decisions remain estimates; missing supplier cash timing, fresh data or confirmed fulfillment routing blocks a supported scale verdict. Stock snapshots remain physical; shared stock is not silently reserved for one store.
+
+Payroll, owner distributions, tax amounts and filing/payment dates are reviewed manual records, not computed legal advice. Local document extraction produces UNREVIEWED proposals; original files are private and confirmation is mandatory. No automatic bank/ad/supplier action occurs.
 
 ## Autonomous expansion
 

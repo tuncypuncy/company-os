@@ -14,14 +14,26 @@ export async function workspace(
   days: number,
   entityId?: string,
   includePrivate = true,
+  range?: { from: string; to: string },
 ) {
   const db = await getDb();
   const asOf = new Date().toISOString();
-  const today = asOf.slice(0, 10);
+  const today = range?.to ?? asOf.slice(0, 10);
   const start = new Date(`${today}T00:00:00Z`);
-  start.setUTCDate(start.getUTCDate() - days + 1);
+  if (range) {
+    start.setTime(Date.parse(range.from + "T00:00:00Z"));
+    days =
+      Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86400000) +
+      1;
+  } else start.setUTCDate(start.getUTCDate() - days + 1);
+  const periodEnd = range
+    ? new Date(
+        Math.min(Date.parse(range.to + "T23:59:59.999Z"), Date.parse(asOf)),
+      ).toISOString()
+    : asOf;
   const [
     stores,
+    brands,
     entities,
     products,
     orders,
@@ -52,6 +64,9 @@ export async function workspace(
       "SELECT id,name,accent_color,brand_id,mapping_status FROM stores ORDER BY id",
     ),
     db.query<{ id: string; name: string }>(
+      "SELECT id,name FROM brands ORDER BY name",
+    ),
+    db.query<{ id: string; name: string }>(
       "SELECT id,name FROM legal_entities ORDER BY name",
     ),
     db.query<{ id: string; name: string; brand_id: string }>(
@@ -66,14 +81,15 @@ export async function workspace(
       internal_refund_minor: string | null;
       platform_refund_minor: string;
       processing_minor: string;
+      fees_status: string;
       currency: string;
       source: string;
       customer_country: string;
       supplier_id: string;
       supplier_batch: string;
     }>(
-      "SELECT * FROM orders WHERE store_id=$1 AND currency=$2 AND ordered_at>=$3 AND ordered_at<=$4 AND ($5::text IS NULL OR legal_entity_id=$5) ORDER BY ordered_at",
-      [storeId, currency, start.toISOString(), asOf, entityId ?? null],
+      "SELECT * FROM orders WHERE store_id=$1 AND (source<>'SHOPIFY' OR financial_status IN ('PAID','PARTIALLY_PAID','PARTIALLY_REFUNDED','REFUNDED')) AND currency=$2 AND ordered_at>=$3 AND ordered_at<=$4 AND ($5::text IS NULL OR legal_entity_id=$5) ORDER BY ordered_at",
+      [storeId, currency, start.toISOString(), periodEnd, entityId ?? null],
     ),
     db.query<{
       id: string;
@@ -83,8 +99,8 @@ export async function workspace(
       bundle_quantity: number;
       sku: string;
     }>(
-      "SELECT i.* FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.store_id=$1 AND o.currency=$2 AND o.ordered_at>=$3 AND o.ordered_at<=$4 AND ($5::text IS NULL OR o.legal_entity_id=$5)",
-      [storeId, currency, start.toISOString(), asOf, entityId ?? null],
+      "SELECT i.* FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.store_id=$1 AND (o.source<>'SHOPIFY' OR o.financial_status IN ('PAID','PARTIALLY_PAID','PARTIALLY_REFUNDED','REFUNDED')) AND o.currency=$2 AND o.ordered_at>=$3 AND o.ordered_at<=$4 AND ($5::text IS NULL OR o.legal_entity_id=$5)",
+      [storeId, currency, start.toISOString(), periodEnd, entityId ?? null],
     ),
     db.query<CostRule>(
       "SELECT * FROM cost_rules WHERE store_id=$1 AND currency=$2 AND ($3::text IS NULL OR legal_entity_id=$3)",
@@ -125,7 +141,7 @@ export async function workspace(
       filing_date: string | null;
       period: string | null;
     }>(
-      "SELECT id,title,category,amount_minor,currency,legal_entity_id,store_id,due_at,status,scope,source,filing_date,period FROM obligations WHERE store_id=$1 AND currency=$2 AND ($3::text IS NULL OR legal_entity_id=$3) ORDER BY due_at",
+      "SELECT id,title,category,(amount_minor-COALESCE((SELECT sum(p.amount_minor) FROM obligation_payments p WHERE p.obligation_id=obligations.id),0)) AS amount_minor,currency,legal_entity_id,store_id,due_at,status,scope,source,filing_date,period FROM obligations WHERE store_id=$1 AND currency=$2 AND ($3::text IS NULL OR legal_entity_id=$3) ORDER BY due_at",
       [storeId, currency, entityId ?? null],
     ),
     db.query<{
@@ -181,7 +197,7 @@ export async function workspace(
       [storeId, currency, entityId ?? null],
     ),
     db.query<{ daily_minor: string }>(
-      "SELECT b.daily_minor FROM ad_budgets b JOIN ad_accounts a ON a.id=b.account_id WHERE a.store_id=$1 AND a.platform=$2 AND a.currency=$3 AND ($4::text IS NULL OR a.legal_entity_id=$4) ORDER BY b.effective_at DESC LIMIT 1",
+      "SELECT b.daily_minor FROM ad_budgets b WHERE b.account_id=(SELECT m.ad_account_id FROM meta_credit_snapshots c JOIN meta_billing_accounts m ON m.id=c.billing_account_id JOIN ad_accounts a ON a.id=m.ad_account_id WHERE a.store_id=$1 AND a.platform=$2 AND a.currency=$3 AND ($4::text IS NULL OR m.legal_entity_id=$4) ORDER BY c.observed_at DESC LIMIT 1) ORDER BY b.effective_at DESC LIMIT 1",
       [storeId, "META", currency, entityId ?? null],
     ),
     db.query<{
@@ -322,6 +338,15 @@ export async function workspace(
       .filter((r) => orders.rows.some((o) => o.id === r.order_id))
       .map((r) => r.fee_impact_minor ?? 0),
   );
+  const missingRefundBasis = orders.rows.filter(
+    (o) =>
+      o.source === "SHOPIFY" &&
+      integer(o.platform_refund_minor) > 0 &&
+      !(reviewedPolicy && o.internal_refund_minor !== null),
+  ).length;
+  const missingFees = orders.rows.filter(
+    (o) => o.fees_status === "UNAVAILABLE",
+  ).length;
   const metrics = profitability({
     gross: total(orders.rows.map((o) => o.gross_minor)),
     discounts: total(orders.rows.map((o) => o.discount_minor)),
@@ -377,6 +402,14 @@ export async function workspace(
           entityId,
         }),
   );
+  if (appMode() === "live" && policy.rows[0]?.safety_buffer_minor == null)
+    for (const forecast of forecasts) {
+      Object.assign(forecast, {
+        buffer: null,
+        surplus: null,
+        fundingNeeded: null,
+      });
+    }
   const chart = Array.from({ length: days }, (_, i) => {
     const day = new Date(start.getTime() + i * 86400000)
       .toISOString()
@@ -424,22 +457,44 @@ export async function workspace(
     entityId: entityId ?? null,
     days,
     stores: stores.rows,
+    brands: brands.rows,
     entities: entities.rows,
     products: products.rows,
     metrics: {
       ...metrics,
-      net: orders.rows.length ? metrics.net : null,
-      profit: orders.rows.length ? metrics.profit : null,
-      margin: orders.rows.length ? metrics.margin : null,
+      net: orders.rows.length && !missingRefundBasis ? metrics.net : null,
+      profit:
+        orders.rows.length &&
+        ads.rows.length &&
+        !missingFees &&
+        !missingRefundBasis &&
+        !(reviewedPolicy && missingRefunds)
+          ? metrics.profit
+          : null,
+      margin:
+        orders.rows.length &&
+        ads.rows.length &&
+        !missingFees &&
+        !missingRefundBasis &&
+        !(reviewedPolicy && missingRefunds)
+          ? metrics.margin
+          : null,
       cogs:
         missing || !costs.length
           ? null
           : total(costs.map((c) => c.total)) - recovery,
       ads: ads.rows.length ? total(ads.rows.map((a) => a.actual_minor)) : null,
       refunds: total(orders.rows.map((o) => selectedRefund(o))),
-      fees: total(orders.rows.map((o) => o.processing_minor)),
+      fees: missingFees
+        ? null
+        : total(orders.rows.map((o) => o.processing_minor)) + extraFees,
       operatingExpenses: total(operating.rows.map((r) => r.amount_minor)),
       operatingProfit:
+        !orders.rows.length ||
+        !ads.rows.length ||
+        missingFees ||
+        missingRefundBasis ||
+        (reviewedPolicy && missingRefunds) ||
         metrics.profit === null
           ? null
           : metrics.profit - total(operating.rows.map((r) => r.amount_minor)),
@@ -447,6 +502,8 @@ export async function workspace(
       refundPolicy: reviewedPolicy ? "INTERNAL_REVIEWED" : "PLATFORM",
       orders: orders.rows.length,
       missingCosts: missing,
+      missingFees,
+      missingRefundBasis,
       missingRefunds,
     },
     chart: orders.rows.length ? chart : [],
@@ -496,9 +553,9 @@ export async function workspace(
           }
         : null,
     inventory: {
-      status: "UNAVAILABLE",
+      status: "OPERATIONAL_WORKSPACE",
       reason:
-        "CJ is not connected. Stock counts, warehouse mappings and inbound ETAs have not been supplied.",
+        "Reviewed stock, mappings, physical demand and inbound evidence are available from the inventory operations workspace. External CJ access remains unverified.",
     },
     assumptions: [
       "Reporting dates use UTC. Revenue excludes tax; demo gross includes shipping.",

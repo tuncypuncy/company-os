@@ -77,6 +77,73 @@ test("operational flows persist, retain histories and reject duplicate financial
       ).rows[0].n,
       3,
     );
+    const constrainedSupplier = await run("supplier", {
+      name: "TEST constrained supplier",
+    });
+    const constrainedRule = {
+      productId: "jar",
+      bundleQuantity: "2",
+      product: "9.00",
+      packaging: "0",
+      fulfillment: "0",
+      shipping: "0",
+      other: "0",
+      effectiveStart: "2025-01-01",
+      supplierId: constrainedSupplier.id,
+      reason: "Verified supplier pricing",
+    };
+    const initialRule = await run("cost-rule", constrainedRule);
+    await run("cost-rule", {
+      ...constrainedRule,
+      effectiveStart: "2025-02-01",
+      product: "10.00",
+    });
+    assert.equal(
+      (
+        await db.query<{ n: number }>(
+          "SELECT count(*)::int n FROM cost_rules WHERE supplier_id=$1",
+          [constrainedSupplier.id],
+        )
+      ).rows[0].n,
+      2,
+    );
+    assert.equal(
+      new Date(
+        (
+          await db.query<{ effective_end: string }>(
+            "SELECT effective_end FROM cost_rules WHERE id=$1",
+            [initialRule.id],
+          )
+        ).rows[0].effective_end,
+      )
+        .toISOString()
+        .slice(0, 10),
+      "2025-02-01",
+    );
+    const expected = await run("inflow", {
+      title: "TEST settlement",
+      amount: "100.00",
+      expectedAt: "2026-10-10T12:00",
+      status: "ESTIMATED",
+    });
+    await run("inflow-update", {
+      id: expected.id,
+      amount: "95.00",
+      expectedAt: "2026-10-11T12:00",
+      status: "CONFIRMED",
+      reason: "Reviewed settlement advice",
+    });
+    await run("inflow-settle", { id: expected.id });
+    await assert.rejects(
+      run("inflow-update", {
+        id: expected.id,
+        amount: "95.00",
+        expectedAt: "2026-10-12T12:00",
+        status: "CANCELLED",
+        reason: "Invalid historical rewrite",
+      }),
+      /Referenced record/,
+    );
     await run("cost-calculate", {});
     const item = (
       await db.query<{
@@ -92,6 +159,45 @@ test("operational flows persist, retain histories and reject duplicate financial
         [item.id],
       )
     ).rows[0];
+    const refundValues = {
+      orderId: item.order_id,
+      eventId: "TEST-refund-review",
+      platform: "1.00",
+      internal: "1.00",
+      recovered: "0.00",
+      feeImpact: "0.00",
+      date: new Date().toISOString().slice(0, 10),
+      restocked: "UNKNOWN",
+      reason: "Reviewed fictional net refund",
+    };
+    await run("refund", refundValues);
+    await run("refund", {
+      ...refundValues,
+      internal: "0.50",
+      reason: "Revised net basis",
+    });
+    assert.equal(
+      (
+        await db.query<{ n: number }>(
+          "SELECT count(*)::int n FROM refunds WHERE order_id=$1 AND external_id=$2",
+          [item.order_id, refundValues.eventId],
+        )
+      ).rows[0].n,
+      1,
+    );
+    await assert.rejects(
+      run("refund", { ...refundValues, recovered: "999999.00" }),
+      /Recovered COGS/,
+    );
+    assert.equal(
+      (
+        await db.query<{ n: string }>(
+          "SELECT internal_minor AS n FROM refunds WHERE order_id=$1 AND external_id=$2",
+          [item.order_id, refundValues.eventId],
+        )
+      ).rows[0].n,
+      50,
+    );
     const invoice = await db.transaction((tx) =>
       postInvoice(
         tx,
@@ -310,6 +416,80 @@ test("operational flows persist, retain histories and reject duplicate financial
       ),
       /mapping/,
     );
+    const liability = (
+      await db.query<{ id: string }>(
+        "SELECT id FROM obligations WHERE title='Supplier purchase' LIMIT 1",
+      )
+    ).rows[0];
+    const testExpense = await run("expense", {
+      vendor: "TEST partial pay",
+      category: "SaaS",
+      amount: "100.00",
+      recognizedDate: "2026-10-06",
+      dueDate: "2026-10-07",
+      recognition: "OPERATING",
+      notes: "",
+    });
+    const expenseOb = (
+      await db.query<{ obligation_id: string }>(
+        "SELECT obligation_id FROM expenses WHERE id=$1",
+        [testExpense.id],
+      )
+    ).rows[0].obligation_id;
+    const payment = await run("payment", {
+      obligationId: expenseOb,
+      amount: "40.00",
+      paidAt: new Date().toISOString(),
+      reference: "TEST-PARTIAL-1",
+    });
+    assert.equal("remaining" in payment ? payment.remaining : null, 6000);
+    await assert.rejects(
+      run("payment", {
+        obligationId: expenseOb,
+        amount: "70.00",
+        paidAt: new Date().toISOString(),
+        reference: "TEST-OVERPAY",
+      }),
+      /remaining/,
+    );
+    await run("payment", {
+      obligationId: expenseOb,
+      amount: "60.00",
+      paidAt: new Date().toISOString(),
+      reference: "TEST-FINAL",
+    });
+    assert.equal(
+      (
+        await db.query<{ status: string }>(
+          "SELECT status FROM obligations WHERE id=$1",
+          [expenseOb],
+        )
+      ).rows[0].status,
+      "PAID",
+    );
+    const { reportingWorkspace } = await import("../src/lib/reporting");
+    const grouped = await reportingWorkspace(
+      "all",
+      "USD",
+      7,
+      undefined,
+      true,
+      "godisabove",
+    );
+    assert.equal(grouped.storeId, "all");
+    assert.ok(grouped.metrics.orders > 0);
+    assert.equal(grouped.meta, null);
+    const ranged = await reportingWorkspace(
+      "gia",
+      "USD",
+      7,
+      undefined,
+      true,
+      undefined,
+      { from: "2026-10-01", to: "2026-10-03" },
+    );
+    assert.equal(ranged.days, 3);
+    assert.equal(ranged.chart.length, 3);
     const ops = await operationalWorkspace("gia", "USD", "omurtak", false);
     assert.equal(ops.tables.payroll.length, 0);
     assert.ok(!ops.tables.expenses.some((e) => e.category === "Payroll"));

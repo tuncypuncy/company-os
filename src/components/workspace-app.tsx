@@ -37,20 +37,14 @@ import {
 import type { User } from "@/lib/auth";
 import type { Workspace } from "@/lib/workspace";
 
+import { OperatorSignals } from "./operator-signals";
+import { FxPanel } from "./fx-panel";
 import { ConnectionSettings } from "./connection-settings";
 import { DecisionSimulator } from "./decision-simulator";
 import { AuditView } from "./audit-view";
 import { OperationsPanel } from "./operations-panel";
 import { api, Badge, type View } from "./workspace-ui";
-import {
-  Overview,
-  InvoiceList,
-  Costs,
-  Cash,
-  Scale,
-  Inventory,
-  Connections,
-} from "./workspace-views";
+import { Overview, InvoiceList, Costs, Cash } from "./workspace-views";
 import {
   Modal,
   InvoiceForm,
@@ -82,6 +76,9 @@ export function WorkspaceApp({
     [currency, setCurrency] = useState("USD"),
     [days, setDays] = useState(7),
     [entity, setEntity] = useState("");
+  const [brand, setBrand] = useState(""),
+    [from, setFrom] = useState(""),
+    [to, setTo] = useState("");
   const [data, setData] = useState<Workspace | null>(null),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -90,27 +87,29 @@ export function WorkspaceApp({
     ),
     [mobile, setMobile] = useState(false),
     [toast, setToast] = useState("");
+  const openModal = (kind: "invoice" | "obligation" | "balance") => {
+    if (store === "all")
+      setToast("Select a store before entering an attributed source record.");
+    else setModal(kind);
+  };
   const refresh = useCallback(async () => {
-    setLoading(true);
     setError("");
     try {
       setData(
         await api(
-          `/api/workspace?store=${store}&currency=${currency}&days=${days}&entity=${entity}`,
+          `/api/workspace?store=${store}&currency=${currency}&days=${days}&entity=${entity}&brand=${brand}${from && to ? `&from=${from}&to=${to}` : ""}`,
         ),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load workspace");
-    } finally {
-      setLoading(false);
     }
-  }, [store, currency, days, entity]);
+  }, [store, currency, days, entity, brand, from, to]);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError("");
     api(
-      `/api/workspace?store=${store}&currency=${currency}&days=${days}&entity=${entity}`,
+      `/api/workspace?store=${store}&currency=${currency}&days=${days}&entity=${entity}&brand=${brand}${from && to ? `&from=${from}&to=${to}` : ""}`,
     )
       .then((d) => {
         if (!cancelled) setData(d);
@@ -124,17 +123,23 @@ export function WorkspaceApp({
     return () => {
       cancelled = true;
     };
-  }, [store, currency, days, entity]);
+  }, [store, currency, days, entity, brand, from, to]);
   const configuredAccent = data?.stores.find(
     (s) => s.id === store,
   )?.accent_color;
   const accent =
     configuredAccent ||
-    (store === "gia-usa"
-      ? "#877AF5"
-      : store === "faucet"
-        ? "#C3C8D2"
-        : "#FFD602");
+    (store === "all"
+      ? "#C3C8D2"
+      : store === "gia-usa"
+        ? "#877AF5"
+        : store === "faucet"
+          ? "#C3C8D2"
+          : "#FFD602");
+  const contextName =
+    store === "all"
+      ? data?.brands.find((b) => b.id === brand)?.name || "Group workspace"
+      : data?.stores.find((s) => s.id === store)?.name;
   const soft =
     store === "gia-usa"
       ? "#CEC8FF"
@@ -233,8 +238,12 @@ export function WorkspaceApp({
               <select
                 id="store"
                 value={store}
-                onChange={(e) => setStore(e.target.value)}
+                onChange={(e) => {
+                  setStore(e.target.value);
+                  setBrand("");
+                }}
               >
+                <option value="all">All stores / group</option>
                 {(
                   data?.stores || [
                     { id: "gia", name: "Godisabove" },
@@ -265,7 +274,7 @@ export function WorkspaceApp({
           <div className="page-title">
             <div>
               <div className="eyebrow">
-                {activeStore?.name || "Your workspace"} /{" "}
+                {contextName || "Your workspace"} /{" "}
                 {view === "overview" ? "THE BIG PICTURE" : "CONTROL TOWER"}
               </div>
               <h1>
@@ -310,6 +319,12 @@ export function WorkspaceApp({
             </div>
             <button
               className="primary"
+              disabled={store === "all"}
+              title={
+                store === "all"
+                  ? "Select a store before adding source records"
+                  : undefined
+              }
               onClick={() =>
                 setModal(view === "cash" ? "obligation" : "invoice")
               }
@@ -328,12 +343,74 @@ export function WorkspaceApp({
                 <button
                   key={d}
                   className={days === d ? "selected" : ""}
-                  onClick={() => setDays(Number(d))}
+                  onClick={() => {
+                    setDays(Number(d));
+                    setFrom("");
+                    setTo("");
+                  }}
                 >
                   {label}
                 </button>
               ))}
             </div>
+            <label className="filter-select">
+              <span className="sr-only">Brand</span>
+              <select
+                aria-label="Brand"
+                value={brand}
+                onChange={(e) => {
+                  setBrand(e.target.value);
+                  setStore("all");
+                }}
+              >
+                <option value="">All brands</option>
+                {data?.brands.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-select">
+              <span className="sr-only">Date preset</span>
+              <select
+                value=""
+                onChange={(e) => {
+                  const now = new Date(),
+                    date = now.toISOString().slice(0, 10);
+                  if (e.target.value === "yesterday") {
+                    now.setUTCDate(now.getUTCDate() - 1);
+                    setFrom(now.toISOString().slice(0, 10));
+                    setTo(now.toISOString().slice(0, 10));
+                  } else if (e.target.value === "mtd") {
+                    setFrom(date.slice(0, 7) + "-01");
+                    setTo(date);
+                  }
+                }}
+              >
+                <option value="">More dates…</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="mtd">Month to date</option>
+              </select>
+            </label>
+            <label className="filter-date">
+              From
+              <input
+                aria-label="Report from date"
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </label>
+            <label className="filter-date">
+              To
+              <input
+                aria-label="Report to date"
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </label>
             <label className="filter-select">
               <span className="sr-only">Legal entity</span>
               <select
@@ -398,32 +475,38 @@ export function WorkspaceApp({
             data && (
               <>
                 {view === "overview" && (
-                  <Overview data={data} onNavigate={choose} />
+                  <>
+                    <Overview data={data} onNavigate={choose} />
+                    <OperatorSignals data={data} onNavigate={choose} />
+                  </>
                 )}
                 {view === "invoices" && (
-                  <InvoiceList data={data} onAdd={() => setModal("invoice")} />
+                  <InvoiceList data={data} onAdd={() => openModal("invoice")} />
                 )}
                 {view === "costs" && (
                   <>
                     <Costs data={data} />
-                    <OperationsPanel
-                      section="commerce"
-                      data={data}
-                      user={user}
-                      onRefresh={refresh}
-                    />
+                    {store !== "all" && (
+                      <OperationsPanel
+                        section="commerce"
+                        data={data}
+                        user={user}
+                        onRefresh={refresh}
+                      />
+                    )}
                   </>
                 )}
                 {view === "cash" && (
                   <Cash
                     data={data}
                     user={user}
-                    onAdd={() => setModal("obligation")}
+                    onAdd={() => openModal("obligation")}
                     onRefresh={refresh}
-                    onBalance={() => setModal("balance")}
+                    onBalance={() => openModal("balance")}
                   />
                 )}
-                {view === "cash" && (
+                {view === "cash" && <FxPanel data={data} />}
+                {view === "cash" && store !== "all" && (
                   <OperationsPanel
                     section="cash"
                     data={data}
@@ -431,11 +514,11 @@ export function WorkspaceApp({
                     onRefresh={refresh}
                   />
                 )}
-                {view === "scale" && (
+                {view === "scale" && store !== "all" && (
                   <DecisionSimulator data={data} user={user} />
                 )}
                 {view === "audit" && <AuditView user={user} />}
-                {view === "inventory" && (
+                {view === "inventory" && store !== "all" && (
                   <OperationsPanel
                     section="inventory"
                     data={data}
@@ -443,16 +526,25 @@ export function WorkspaceApp({
                     onRefresh={refresh}
                   />
                 )}
-                {["expenses", "prepaid", "meta"].includes(view) && (
-                  <OperationsPanel
-                    section={view}
-                    data={data}
-                    user={user}
-                    onRefresh={refresh}
-                  />
-                )}
-                {view === "integrations" && (
+                {["expenses", "prepaid", "meta"].includes(view) &&
+                  store !== "all" && (
+                    <OperationsPanel
+                      section={view}
+                      data={data}
+                      user={user}
+                      onRefresh={refresh}
+                    />
+                  )}
+                {view === "integrations" && store !== "all" && (
                   <ConnectionSettings data={data} user={user} />
+                )}
+                {store === "all" && (
+                  <div className="info-banner">
+                    Group totals use {currency} only. Cash is not assumed
+                    transferable between companies. Select a store to enter
+                    records, review credit facilities, map inventory or run a
+                    routed scaling scenario.
+                  </div>
                 )}
                 <footer className="main-footer">
                   <span>

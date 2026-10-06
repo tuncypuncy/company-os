@@ -2,6 +2,9 @@ import { requireUser, errorResponse, HttpError } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 const tables = [
   "user_access",
+  "processing_review",
+  "alert_review",
+  "orders",
   "invoices",
   "cost_rules",
   "obligations",

@@ -69,3 +69,12 @@ Use official pinned Supabase SDK for server-side private Storage; keep existing 
 ## Autonomous expansion — owner instruction
 
 The owner explicitly authorized completing the credential-independent master backlog, inspecting the real browser, maintaining docs and committing stable progress. Implement manual source flows with the same relational domain models as integrations. Separate economic recognition from canonical cash obligations. Store immutable COGS estimates and reconciliation revisions. Prepaid component allocations replace the original component only while costs are estimates; actual invoice totals remain authoritative. Inventory demand uses physical BOM components, with no inferred country-based fulfillment routing.
+
+
+## Reporting and operational integrity — 2026-10-06
+
+Group reporting uses currency-separated store totals and preserves per-store cash buffers without implying company transfers. Custom periods are UTC until confirmed store reporting timezones are configured. FX translations require explicit source rates and expose missing coverage. Partial payments preserve outstanding cash liability without changing bank balances.
+
+Integration access remains unverified. Incomplete Meta ad-set budget coverage is not published; CBO/lifetime budgeting needs an independently confirmed total. Imported Shopify fees/refund net basis require review before definitive profit. CJ uses a confirmed official profile only, because current official docs are network-blocked. See INTEGRATION_SETUP.md.
+
+Local OCR/text extraction uses trusted deployment binaries and bounded jobs, requires human confirmation, and never contacts an external extraction provider. Private expense receipts attach to existing expenses without another financial posting. Remaining deployment work includes backups/restore tests, monitoring, retention/orphan reconciliation and account-security extensions.

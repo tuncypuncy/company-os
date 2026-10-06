@@ -11,7 +11,7 @@ try {
   await db
     .query(
       "SELECT version FROM company_os.schema_migrations WHERE version=$1",
-      ["003_private_storage"],
+      ["009_expense_evidence"],
     )
     .then((result) => {
       if (!result.rows.length)

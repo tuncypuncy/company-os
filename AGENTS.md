@@ -32,9 +32,9 @@ Never invent business facts, prices, balances, tax treatment, mappings, lead tim
 - Test meaningful financial edge cases, authorization, duplicate imports/webhooks, historical rules, bundle consumption, currency conversion, and unavailable inputs when implementing those features.
 - Report implemented, tested, demo, unavailable, and planned capabilities separately. Update integration state only with evidence.
 
-## Working V0.1 baseline
+## Working application
 
-The application now has migrations, persistent demo PostgreSQL, sessions, a themed dashboard, manual invoices/payments/balances, COGS/cash calculations and a simplified scaling calculator. Read README.md for commands and explicit limitations. Integrations and AI extraction are not live. `company_os` is an isolated database schema; never expose it directly to anonymous Supabase/browser clients. Use one process per PGlite data directory.
+The application has nine migrations, persistent demo PostgreSQL, verified-TLS live architecture, role-based sessions, financial/inventory operations, integration contracts, local extraction and combined scaling decisions. Read README.md for commands and explicit limitations. Integrations and AI extraction are not live. `company_os` is an isolated database schema; never expose it directly to anonymous Supabase/browser clients. Use one process per PGlite data directory.
 
 Current Next.js ships local version-specific guidance in `node_modules/next/dist/docs/`. Consult it when changing framework APIs. `agentRules: false` prevents the dev server from rewriting this file.
 

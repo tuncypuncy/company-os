@@ -44,6 +44,49 @@ export const operations: Record<
     fields: Field[];
   }
 > = {
+  payment: {
+    label: "Record partial payment",
+    section: "cash",
+    owner: true,
+    description:
+      "Records money already paid; it does not move funds or adjust source balance snapshots. The remaining liability stays in the forecast.",
+    fields: [
+      ref("obligationId", "Payment liability", "obligations"),
+      money("amount", "Amount paid"),
+      { name: "paidAt", label: "Actual payment time", type: "datetime-local" },
+      text("reference", "Unique payment reference"),
+    ],
+  },
+  purchase: {
+    label: "Record supplier purchase",
+    section: "inventory",
+    description:
+      "One reviewed purchase creates a single supplier liability and linked inbound shipment; there is no automatic ordering.",
+    fields: [
+      ref("supplierSkuId", "Supplier SKU", "supplierSkus"),
+      ref("warehouseId", "Destination warehouse", "warehouses"),
+      number("quantity", "Purchased physical units"),
+      money("unitCost", "Cost per physical unit"),
+      money("freight", "Freight / other charges"),
+      date("orderedDate", "Order date"),
+      date("dueDate", "Payment due"),
+      { name: "eta", label: "Expected availability", type: "datetime-local" },
+      number("leadDays", "Confirmed supplier lead days", "0"),
+      text("notes", "Supplier terms / evidence"),
+    ],
+  },
+  fees: {
+    label: "Review processing fees",
+    section: "commerce",
+    owner: true,
+    description:
+      "Record the actual processing fees for an order. Zero is an explicit reviewed value, not an assumed missing fee.",
+    fields: [
+      ref("orderId", "Order", "orders"),
+      money("amount", "Processing fee"),
+      text("reason", "Source evidence"),
+    ],
+  },
   order: {
     label: "Record manual order",
     section: "commerce",
@@ -79,6 +122,10 @@ export const operations: Record<
       text("sku", "SKU constraint", true),
       text("country", "Country constraint", true),
       text("batch", "Batch constraint", true),
+      {
+        ...ref("supplierId", "Supplier constraint", "suppliers"),
+        optional: true,
+      },
       text("reason", "Source / change reason"),
     ],
   },
@@ -97,6 +144,14 @@ export const operations: Record<
         name: "recognition",
         label: "Recognition",
         options: ["OPERATING", "CAPITAL", "COGS_LINKED", "PERSONAL"],
+      },
+      {
+        ...ref(
+          "linkedObligationId",
+          "Existing payment / invoice liability (optional)",
+          "obligations",
+        ),
+        optional: true,
       },
       text("notes", "Evidence / notes", true),
     ],
@@ -152,6 +207,24 @@ export const operations: Record<
         label: "Confidence",
         options: ["ESTIMATED", "CONFIRMED"],
       },
+    ],
+  },
+  "inflow-update": {
+    label: "Reschedule or cancel inflow",
+    section: "cash",
+    owner: true,
+    description:
+      "Preserve source history and update only outstanding expected cash; received inflows cannot be rewritten.",
+    fields: [
+      ref("id", "Expected inflow", "inflows"),
+      money("amount", "Reviewed amount"),
+      { name: "expectedAt", label: "Expected arrival", type: "datetime-local" },
+      {
+        name: "status",
+        label: "State",
+        options: ["ESTIMATED", "CONFIRMED", "CANCELLED"],
+      },
+      text("reason", "Review evidence"),
     ],
   },
   "inflow-settle": {

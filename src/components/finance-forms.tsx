@@ -97,6 +97,15 @@ export function InvoiceForm({
     [file, setFile] = useState<File | null>(null),
     [review, setReview] = useState(false),
     [createRules, setCreateRules] = useState(false);
+  const [extracted, setExtracted] = useState<{
+      text: string;
+      vendorCandidate: string | null;
+      invoiceReferenceCandidate: string | null;
+      totalCandidates: string[];
+      method: string;
+      message?: string;
+    } | null>(null),
+    [extracting, setExtracting] = useState(false);
   const products = d.products.filter(
     (p) => p.brand_id === d.stores.find((s) => s.id === d.storeId)?.brand_id,
   );
@@ -151,8 +160,8 @@ export function InvoiceForm({
       <div className="form-intro">
         <Badge>{d.mode === "demo" ? "DEMO ONLY" : "MANUAL ENTRY"}</Badge>
         <p>
-          AI extraction is not connected. Enter the invoice details, verify the
-          source, then explicitly confirm.
+          Local OCR/text reading can propose source text. Review the invoice
+          details, mappings and totals before explicitly confirming.
         </p>
       </div>
       <label className="upload-zone">
@@ -162,9 +171,61 @@ export function InvoiceForm({
         <input
           type="file"
           accept="application/pdf,image/png,image/jpeg"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          onChange={(e) => {
+            setFile(e.target.files?.[0] || null);
+            setExtracted(null);
+            setReview(false);
+          }}
         />
       </label>
+      {file && (
+        <button
+          type="button"
+          className="secondary"
+          disabled={extracting}
+          onClick={async () => {
+            setExtracting(true);
+            setError("");
+            try {
+              const result = await api("/api/extraction", {
+                method: "POST",
+                headers: {
+                  "Content-Type": file.type || "application/octet-stream",
+                },
+                body: file,
+              });
+              setExtracted(result);
+            } catch (e) {
+              setError(e instanceof Error ? e.message : "Extraction failed");
+            } finally {
+              setExtracting(false);
+            }
+          }}
+        >
+          {extracting ? "Reading document…" : "Read source document"}
+        </button>
+      )}
+      {extracted && (
+        <details open className="extraction-preview">
+          <summary>Unreviewed extraction · {extracted.method}</summary>
+          <p>
+            {extracted.message ||
+              "Candidates are proposals only. Enter corrected fields below; nothing is posted automatically."}
+          </p>
+          <p>
+            Vendor candidate: {extracted.vendorCandidate || "Unknown"} ·
+            Reference: {extracted.invoiceReferenceCandidate || "Unknown"} ·
+            Total candidates:{" "}
+            {extracted.totalCandidates.join(", ") || "Unknown"}
+          </p>
+          <textarea
+            readOnly
+            aria-label="Extracted source text"
+            rows={8}
+            value={extracted.text}
+          />
+        </details>
+      )}
       <div className="form-grid">
         <label>
           Supplier / vendor

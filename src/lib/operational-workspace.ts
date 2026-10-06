@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getDb, appMode } from "./db";
 import { integer } from "./finance";
 import { stockForecast, bomDemand, earlyPayment } from "./operations-engine";
@@ -130,7 +131,10 @@ export async function operationalWorkspace(
       "SELECT DISTINCT ON(b.account_id) b.* FROM cash_balance_snapshots b JOIN cash_accounts a ON a.id=b.account_id WHERE a.store_id=$1 AND a.currency=$2 AND ($3::text IS NULL OR a.legal_entity_id=$3) ORDER BY b.account_id,b.observed_at DESC",
       [storeId, currency, entityId ?? null],
     ),
-    scoped("obligations"),
+    db.query<Row>(
+      "SELECT o.*,(o.amount_minor-COALESCE((SELECT sum(p.amount_minor) FROM obligation_payments p WHERE p.obligation_id=o.id),0)) AS amount_minor FROM obligations o WHERE store_id=$1 AND currency=$2 AND ($3::text IS NULL OR legal_entity_id=$3)",
+      [storeId, currency, entityId ?? null],
+    ),
     db.query<Row>(
       "SELECT c.*,p.component FROM prepaid_consumption c JOIN prepaid_cost_pools p ON p.id=c.pool_id WHERE p.store_id=$1 AND p.currency=$2",
       [storeId, currency],
@@ -174,6 +178,11 @@ export async function operationalWorkspace(
         String(r[label] || r.id) +
         (key === "costs" ? " · " + String(r.estimated_minor) + " minor" : ""),
     }));
+  lookups.obligations = obligations.rows
+    .filter(
+      (o) => o.scope === "COMPANY" && (owner || !sensitiveCategory(o.category)),
+    )
+    .map((o) => ({ id: String(o.id), name: String(o.title) }));
   const demandFor = (window: number) => {
     const demand: Record<string, number> = {};
     let unmapped = 0;
@@ -340,7 +349,12 @@ export async function operationalWorkspace(
     recommendation: string,
   ) =>
     alerts.push({
-      id: kind + ":" + recordId,
+      id:
+        kind +
+        ":" +
+        recordId +
+        ":" +
+        createHash("sha256").update(reason).digest("hex").slice(0, 12),
       severity,
       kind,
       reason,
@@ -348,6 +362,46 @@ export async function operationalWorkspace(
       recommendation,
       at: asOf,
     });
+  const connections = (
+    await db.query<Row>(
+      "SELECT id,platform,status,last_success_at,last_error FROM integration_connections WHERE store_id=$1",
+      [storeId],
+    )
+  ).rows;
+  for (const connection of connections) {
+    if (connection.status === "ERROR")
+      add(
+        "INTEGRATION",
+        "WATCH",
+        String(connection.platform) + " sync requires attention",
+        String(connection.id),
+        "Review connection permissions and the latest sanitized error",
+      );
+    else if (
+      connection.status === "CONNECTED" &&
+      (!connection.last_success_at || stale(connection.last_success_at))
+    )
+      add(
+        "STALE_INTEGRATION",
+        "WATCH",
+        String(connection.platform) + " source is stale",
+        String(connection.id),
+        "Run the integration worker and verify the source window",
+      );
+  }
+  for (const pool of pools.rows) {
+    const used = consumption.rows
+      .filter((c) => c.pool_id === pool.id)
+      .reduce((n, c) => n + Number(c.quantity), 0);
+    if (used >= Number(pool.eligible_quantity))
+      add(
+        "PREPAID",
+        "WATCH",
+        String(pool.name) + " prepaid quantity is exhausted",
+        String(pool.id),
+        "Review renewed inventory funding and eligible cost assumptions",
+      );
+  }
   for (const s of inventory) {
     if (s.risk === "WATCH" || s.risk === "CRITICAL")
       add(
@@ -446,6 +500,14 @@ export async function operationalWorkspace(
         String(s.id),
         "Update the shipment stage and ETA from evidence",
       );
+  const acknowledgements = (
+    await db.query<{ alert_key: string }>(
+      "SELECT alert_key FROM alert_acknowledgements WHERE acknowledged_at>now()-interval '7 days'",
+    )
+  ).rows;
+  const activeAlerts = alerts.filter(
+    (a) => !acknowledgements.some((r) => r.alert_key === a.id),
+  );
   const visibleExpenses = expenses.rows.filter(
     (e) =>
       owner || (!sensitiveCategory(e.category) && e.recognition !== "PERSONAL"),
@@ -501,7 +563,7 @@ export async function operationalWorkspace(
     tables,
     inventory,
     facilities,
-    alerts,
+    alerts: activeAlerts,
     settings: policy ?? null,
     bom: bom.rows,
     mappings: mappings.rows,

@@ -65,6 +65,8 @@ export class CJAdapter {
       const r = row as Record<string, unknown>,
         available = Number(r[p.availableField]);
       if (
+        r[p.availableField] == null ||
+        r[p.availableField] === "" ||
         !Number.isSafeInteger(available) ||
         available < 0 ||
         typeof r[p.warehouseField] !== "string"

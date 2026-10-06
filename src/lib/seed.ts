@@ -96,7 +96,7 @@ export async function seedDemo(db: Database) {
           const oid = `demo-${store}-${day}-${j}`;
           const bundles = Math.round((idx ? 110 : 155) * growth);
           await tx.query(
-            "INSERT INTO orders(id,store_id,legal_entity_id,external_id,ordered_at,currency,gross_minor,discount_minor,platform_refund_minor,internal_refund_minor,processing_minor,source,status) VALUES($1,$2,$3,$1,$4,'USD',$5,$6,$7,$8,$9,'DEMO','DEMO')",
+            "INSERT INTO orders(id,store_id,legal_entity_id,external_id,ordered_at,currency,gross_minor,discount_minor,platform_refund_minor,internal_refund_minor,processing_minor,source,status,fees_status) VALUES($1,$2,$3,$1,$4,'USD',$5,$6,$7,$8,$9,'DEMO','DEMO','DEMO')",
             [
               oid,
               store,

@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const { id } = await params;
     const { rows } = await (
       await getDb()
@@ -18,8 +18,8 @@ export async function GET(
         original_name: string;
       } & StoredFile
     >(
-      "SELECT storage_key,mime_type,original_name,storage_provider,storage_bucket FROM invoice_attachments WHERE id=$1",
-      [id],
+      "SELECT storage_key,mime_type,original_name,storage_provider,storage_bucket FROM invoice_attachments WHERE id=$1 UNION ALL SELECT a.storage_key,a.mime_type,a.original_name,a.storage_provider,a.storage_bucket FROM expense_attachments a JOIN expenses e ON e.id=a.expense_id WHERE a.id=$1 AND ($2=true OR (e.recognition<>'PERSONAL' AND e.category !~* 'payroll|salary|tax|vat|dividend|distribution|owner|contribution'))",
+      [id, user.role === "OWNER"],
     );
     const a = rows[0];
     if (!a) throw new HttpError(404, "Attachment not found");

@@ -13,6 +13,8 @@ import type { OperationalWorkspace } from "@/lib/operational-workspace";
 import type { Workspace } from "@/lib/workspace";
 import type { User } from "@/lib/auth";
 import { api, amount, Badge, Empty } from "./workspace-ui";
+import { Lineage } from "./lineage";
+import { ReorderPlanner } from "./reorder-planner";
 import { Modal } from "./finance-forms";
 type Row = Record<string, unknown>;
 const columns: Record<string, string[]> = {
@@ -330,6 +332,9 @@ export function OperationsPanel({
               )}
             </>
           )}
+          {section === "inventory" && (
+            <ReorderPlanner data={d} onPurchase={() => setAction("purchase")} />
+          )}
           {section === "meta" && (
             <div className="inventory-grid">
               {d.facilities.map((f) => (
@@ -413,6 +418,7 @@ export function OperationsPanel({
               rows={(d.tables[selected] || []).filter((r) =>
                 JSON.stringify(r).toLowerCase().includes(search.toLowerCase()),
               )}
+              kind={selected === "fx" ? undefined : selected}
               fields={columns[selected]}
               currency={data.currency}
             />
@@ -451,6 +457,33 @@ export function OperationsPanel({
                       <b>{a.reason}</b>
                       <p>{a.recommendation}</p>
                     </div>
+                    <button
+                      className="text-button"
+                      onClick={async () => {
+                        try {
+                          await api("/api/alerts", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              store: data.storeId,
+                              currency: data.currency,
+                              ...(data.entityId
+                                ? { entity: data.entityId }
+                                : {}),
+                              key: a.id,
+                              reason: "Reviewed in the operating workspace",
+                            }),
+                          });
+                          await load();
+                        } catch (e) {
+                          setError(
+                            e instanceof Error ? e.message : "Review failed",
+                          );
+                        }
+                      }}
+                    >
+                      Acknowledge
+                    </button>
                     <Badge
                       tone={a.severity === "CRITICAL" ? "danger" : "warning"}
                     >
@@ -485,11 +518,14 @@ export function RecordTable({
   rows,
   fields,
   currency,
+  kind,
 }: {
+  kind?: string;
   rows: Row[];
   fields: string[];
   currency: string;
 }) {
+  const [lineage, setLineage] = useState("");
   if (!rows.length)
     return (
       <Empty title="No records in this context">
@@ -499,9 +535,13 @@ export function RecordTable({
     );
   return (
     <div className="table-scroll">
+      {lineage && kind && (
+        <Lineage kind={kind} id={lineage} onClose={() => setLineage("")} />
+      )}
       <table>
         <thead>
           <tr>
+            {kind && <th>Evidence</th>}
             {fields.map((f) => (
               <th key={f}>{f.replaceAll("_minor", "").replaceAll("_", " ")}</th>
             ))}
@@ -510,6 +550,16 @@ export function RecordTable({
         <tbody>
           {rows.slice(0, 200).map((r, i) => (
             <tr key={String(r.id ?? i)}>
+              {kind && (
+                <td>
+                  <button
+                    className="text-button"
+                    onClick={() => setLineage(String(r.id))}
+                  >
+                    View source
+                  </button>
+                </td>
+              )}
               {fields.map((f) => (
                 <td key={f}>
                   {r[f] === null || r[f] === undefined

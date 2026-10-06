@@ -30,6 +30,12 @@ CJ transport/profile validation supports only a confirmed official inventory end
 
 Finance, database, operation and provider contract tests run against fictional records. Native PostgreSQL 17 with verified local TLS also passed repeatable migrations, live-mode demo isolation, pg-driver date handling, transaction rollback and actor audits. Browser checks render the real operation records. Neither the native local database nor mock provider contracts prove Supabase/Shopify/Meta/CJ connectivity.
 
-## Remaining implementation / review work
+## Additional completed modules
 
-Group/brand/custom-date reporting, richer dashboard risk summaries, alert acknowledgements, detailed lineage, supplier purchase/reorder flows, operation UI/browser coverage, integration setup docs and deployment controls are being completed in the current autonomous build. Supabase external readiness and all real provider syncs require credentials. OCR requires a selected provider and explicit human review; payout/processor and later integrations remain unavailable until independently implemented.
+Brand/group/custom-date UTC reporting with currency separation; sourced FX translations; partial payments, rescheduled inflows and outstanding liabilities; purchase/reorder estimates and reviewed inbound creation; alert acknowledgement; order/invoice/cost/payment lineage; local PNG/JPG/text/scanned-PDF proposals with human confirmation; safer fee/refund coverage gates; preserved COGS input snapshots; integration setup guides; recurring scheduling CLI; deployment-only migration URL and runtime permission-group SQL.
+
+## Partial / remaining
+
+External Supabase and provider access still require credentials. CJ additionally requires accessible verified official endpoint/response documentation. Shopify payouts/processor fees, Meta CBO/lifetime budget totals/billing APIs, CJ auth refresh/logistics, bank feeds, password recovery/MFA/SSO and email are not implemented. Tax computation and legal deadlines require confirmed professional inputs. Arbitrary multi-store invoice split allocation, automatic storage orphan reconciliation and high-volume reporting pagination/SQL aggregation remain engineering follow-ups. No automated payments or external purchase/ad actions.
+
+Group reports preserve per-store buffers instead of assuming cross-company transfers. Stock coverage uses known mapped demand; fulfillment routing is never inferred. Live funding/surplus is unavailable until a buffer is configured. Partial payment records settle liabilities but never silently change bank balances.

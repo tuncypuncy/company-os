@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { recordPayment } from "./payments";
 import { operations } from "./operation-definitions";
 import { minor, integer, orderCost, type CostRule } from "./finance";
 import {
@@ -68,7 +69,7 @@ export function parseOperation(raw: unknown, user: Pick<User, "role">) {
     (values.recognition === "PERSONAL" || sensitive.test(values.category || ""))
   )
     throw new HttpError(403, "Owner permission required for sensitive records");
-  return { ...base, values };
+  return { ...base, values, actorRole: user.role };
 }
 export type Command = ReturnType<typeof parseOperation>;
 async function one<T = Record<string, unknown>>(
@@ -139,7 +140,102 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
     );
     return oid;
   };
+  if (
+    ["stock", "meta-credit"].includes(c.action) &&
+    Date.parse(v.observedAt) > Date.now() + 60000
+  )
+    throw new HttpError(400, "A source observation cannot be in the future");
   switch (c.action) {
+    case "payment":
+      return {
+        id,
+        ...(await recordPayment(tx, {
+          id: v.obligationId,
+          amount: money("amount"),
+          paidAt: new Date(v.paidAt).toISOString(),
+          reference: v.reference,
+          actor,
+          owner: true,
+          storeId: c.storeId,
+          entityId: c.entityId,
+          currency: c.currency,
+        })),
+      };
+    case "fees": {
+      await one(
+        tx,
+        "UPDATE orders SET processing_minor=$2,fees_status='CONFIRMED' WHERE id=$1 AND store_id=$3 AND currency=$4 AND legal_entity_id=$5 RETURNING id",
+        [v.orderId, money("amount"), c.storeId, c.currency, c.entityId],
+      );
+      await tx.query(
+        "INSERT INTO audit_logs(table_name,record_id,action,next_value,actor_id) VALUES('processing_review',$1,'REVIEW',$2::jsonb,$3)",
+        [
+          v.orderId,
+          JSON.stringify({ reason: v.reason, amount_minor: money("amount") }),
+          actor,
+        ],
+      );
+      break;
+    }
+    case "purchase": {
+      const sku = await one<{ supplier_id: string }>(
+        tx,
+        "SELECT s.* FROM supplier_skus s JOIN products p ON p.id=s.product_id WHERE s.id=$1 AND p.brand_id=$2",
+        [v.supplierSkuId, store.brand_id],
+      );
+      const quantity = qty("quantity"),
+        cost = quantity * money("unitCost") + money("freight");
+      if (!Number.isSafeInteger(cost) || cost <= 0)
+        throw new HttpError(400, "Invalid purchase total");
+      const oid = await obligation(
+        "Supplier purchase",
+        cost,
+        v.dueDate,
+        "Inventory",
+      );
+      await tx.query(
+        "INSERT INTO purchase_orders(id,supplier_id,legal_entity_id,status,ordered_at,currency,obligation_id) VALUES($1,$2,$3,'CONFIRMED',$4,$5,$6)",
+        [
+          id,
+          sku.supplier_id,
+          c.entityId,
+          v.orderedDate + "T00:00:00Z",
+          c.currency,
+          oid,
+        ],
+      );
+      await tx.query(
+        "INSERT INTO purchase_order_items(id,purchase_order_id,supplier_sku_id,quantity,cost_minor) VALUES($1,$2,$3,$4,$5)",
+        [randomUUID(), id, v.supplierSkuId, quantity, cost],
+      );
+      await tx.query(
+        "INSERT INTO purchase_plan(id,store_id,purchase_order_id,lead_days,source,notes) VALUES($1,$2,$3,$4,$5,$6)",
+        [randomUUID(), c.storeId, id, qty("leadDays", false), source, v.notes],
+      );
+      const shipment = randomUUID();
+      await tx.query(
+        "INSERT INTO inbound_shipments(id,purchase_order_id,destination_warehouse_id,status,eta,source,store_id,legal_entity_id,obligation_id) VALUES($1,$2,$3,'PRODUCTION',$4,$5,$6,$7,$8)",
+        [
+          shipment,
+          id,
+          v.warehouseId,
+          new Date(v.eta).toISOString(),
+          source,
+          c.storeId,
+          c.entityId,
+          oid,
+        ],
+      );
+      await tx.query(
+        "INSERT INTO shipment_items(id,shipment_id,supplier_sku_id,quantity) VALUES($1,$2,$3,$4)",
+        [randomUUID(), shipment, v.supplierSkuId, quantity],
+      );
+      await tx.query(
+        "INSERT INTO shipment_events(id,shipment_id,status,occurred_at,source) VALUES($1,$2,'PRODUCTION',now(),$3)",
+        [randomUUID(), shipment, source],
+      );
+      break;
+    }
     case "order": {
       await product();
       const quantity = qty("quantity"),
@@ -152,7 +248,7 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
       if (money("discount") > money("gross"))
         throw new HttpError(400, "Discount exceeds gross revenue");
       await tx.query(
-        "INSERT INTO orders(id,store_id,legal_entity_id,external_id,ordered_at,currency,gross_minor,discount_minor,processing_minor,source,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'CONFIRMED')",
+        "INSERT INTO orders(id,store_id,legal_entity_id,external_id,ordered_at,currency,gross_minor,discount_minor,processing_minor,source,status,fees_status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'CONFIRMED','CONFIRMED')",
         [
           id,
           c.storeId,
@@ -174,6 +270,8 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
     }
     case "cost-rule": {
       await product();
+      if (v.supplierId)
+        await one(tx, "SELECT id FROM vendors WHERE id=$1", [v.supplierId]);
       await tx.exec("LOCK TABLE cost_rules IN SHARE ROW EXCLUSIVE MODE");
       const old = (
         await tx.query<{
@@ -181,7 +279,7 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
           version: number;
           effective_start: string;
         }>(
-          `SELECT * FROM cost_rules WHERE product_id=$1 AND store_id=$2 AND legal_entity_id=$3 AND currency=$4 AND bundle_quantity=$5 AND sku IS NOT DISTINCT FROM $6 AND country IS NOT DISTINCT FROM $7 AND batch IS NOT DISTINCT FROM $8 AND supplier_id IS NULL AND effective_end IS NULL FOR UPDATE`,
+          `SELECT * FROM cost_rules WHERE product_id=$1 AND store_id=$2 AND legal_entity_id=$3 AND currency=$4 AND bundle_quantity=$5 AND sku IS NOT DISTINCT FROM $6 AND country IS NOT DISTINCT FROM $7 AND batch IS NOT DISTINCT FROM $8 AND supplier_id IS NOT DISTINCT FROM $9 AND effective_end IS NULL FOR UPDATE`,
           [
             v.productId,
             c.storeId,
@@ -191,6 +289,7 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
             v.sku || null,
             v.country || null,
             v.batch || null,
+            v.supplierId || null,
           ],
         )
       ).rows;
@@ -211,7 +310,7 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
           v.effectiveStart,
         ]);
       await tx.query(
-        `INSERT INTO cost_rules(id,product_id,store_id,legal_entity_id,bundle_quantity,currency,product_minor,packaging_minor,fulfillment_minor,shipping_minor,other_minor,effective_start,version,sku,country,batch,source,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'CONFIRMED')`,
+        `INSERT INTO cost_rules(id,product_id,store_id,legal_entity_id,bundle_quantity,currency,product_minor,packaging_minor,fulfillment_minor,shipping_minor,other_minor,effective_start,version,sku,country,batch,source,supplier_id,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'CONFIRMED')`,
         [
           id,
           v.productId,
@@ -230,6 +329,7 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
           v.country || null,
           v.batch || null,
           source + ": " + v.reason,
+          v.supplierId || null,
         ],
       );
       break;
@@ -237,13 +337,30 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
     case "expense": {
       const amount = money("amount");
       if (amount === 0) throw new HttpError(400, "Expense must be positive");
-      const oid = await obligation(
-        v.vendor,
-        amount,
-        v.dueDate,
-        v.category,
-        v.recognition === "PERSONAL" ? "PERSONAL" : "COMPANY",
-      );
+      const oid = v.linkedObligationId
+        ? String(
+            (
+              await one<{ id: string }>(
+                tx,
+                "SELECT id FROM obligations WHERE id=$1 AND store_id=$2 AND legal_entity_id=$3 AND currency=$4 AND amount_minor=$5 AND ($6=true OR (scope='COMPANY' AND category !~* 'payroll|salary|tax|vat|dividend|distribution|owner|contribution'))",
+                [
+                  v.linkedObligationId,
+                  c.storeId,
+                  c.entityId,
+                  c.currency,
+                  amount,
+                  c.actorRole === "OWNER",
+                ],
+              )
+            ).id,
+          )
+        : await obligation(
+            v.vendor,
+            amount,
+            v.dueDate,
+            v.category,
+            v.recognition === "PERSONAL" ? "PERSONAL" : "COMPANY",
+          );
       await tx.query(
         "INSERT INTO expenses(id,legal_entity_id,store_id,vendor,category,currency,amount_minor,recognized_date,obligation_id,recognition,source,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
         [
@@ -404,6 +521,27 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
         ],
       );
       break;
+    case "inflow-update":
+      if (money("amount") <= 0)
+        throw new HttpError(400, "Expected amount must be positive");
+      await one(
+        tx,
+        "UPDATE expected_inflows SET amount_minor=$2,expected_at=$3,status=$4 WHERE id=$1 AND store_id=$5 AND legal_entity_id=$6 AND currency=$7 AND status IN ('ESTIMATED','CONFIRMED') RETURNING id",
+        [
+          v.id,
+          money("amount"),
+          v.expectedAt,
+          v.status,
+          c.storeId,
+          c.entityId,
+          c.currency,
+        ],
+      );
+      await tx.query(
+        "INSERT INTO audit_logs(table_name,record_id,action,next_value,actor_id) VALUES('inflow_review',$1,'REVIEW',$2::jsonb,$3)",
+        [v.id, JSON.stringify({ reason: v.reason }), actor],
+      );
+      break;
     case "inflow-settle":
       await one(
         tx,
@@ -453,7 +591,7 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
       )
         throw new HttpError(400, "Refund exceeds order revenue");
       await tx.query(
-        "INSERT INTO refunds(id,order_id,external_id,platform_minor,internal_minor,refunded_at,restocked,recovered_cogs_minor,fee_impact_minor,reason,source,override_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10)",
+        "INSERT INTO refunds(id,order_id,external_id,platform_minor,internal_minor,refunded_at,restocked,recovered_cogs_minor,fee_impact_minor,reason,source,override_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10) ON CONFLICT(order_id,external_id) WHERE external_id IS NOT NULL DO UPDATE SET internal_minor=EXCLUDED.internal_minor,restocked=EXCLUDED.restocked,recovered_cogs_minor=EXCLUDED.recovered_cogs_minor,fee_impact_minor=EXCLUDED.fee_impact_minor,override_reason=EXCLUDED.override_reason",
         [
           id,
           v.orderId,
@@ -478,10 +616,24 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
         integer(order.gross_minor) - integer(order.discount_minor)
       )
         throw new HttpError(400, "Cumulative refunds exceed order revenue");
-      await tx.query("UPDATE orders SET internal_refund_minor=$2 WHERE id=$1", [
-        v.orderId,
-        totals.amount,
-      ]);
+      const recovery = await one<{ recovered: string; cost: string | null }>(
+        tx,
+        "SELECT (SELECT coalesce(sum(recovered_cogs_minor),0) FROM refunds WHERE order_id=$1) AS recovered,(SELECT sum(coalesce(oc.actual_minor,oc.estimated_minor)) FROM order_costs oc JOIN order_items oi ON oi.id=oc.order_item_id WHERE oi.order_id=$1 AND oc.superseded_at IS NULL) AS cost",
+        [v.orderId],
+      );
+      if (
+        integer(recovery.recovered) > 0 &&
+        (recovery.cost == null ||
+          integer(recovery.recovered) > integer(recovery.cost))
+      )
+        throw new HttpError(
+          400,
+          "Recovered COGS exceeds recorded order costs; calculate costs before reviewing recovery",
+        );
+      await tx.query(
+        "UPDATE orders SET internal_refund_minor=$2, platform_refund_minor=CASE WHEN source IN ('MANUAL','DEMO') THEN $3 ELSE platform_refund_minor END WHERE id=$1",
+        [v.orderId, totals.amount, totals.platform],
+      );
       break;
     }
     case "cost-calculate": {
@@ -545,7 +697,7 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
           ),
         );
         const result = await tx.query(
-          "INSERT INTO order_costs(id,order_item_id,cost_rule_id,rule_version,estimated_minor,components) VALUES($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT(order_item_id) WHERE superseded_at IS NULL DO NOTHING RETURNING id",
+          "INSERT INTO order_costs(id,order_item_id,cost_rule_id,rule_version,estimated_minor,components,input_snapshot) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb) ON CONFLICT(order_item_id) WHERE superseded_at IS NULL DO NOTHING RETURNING id",
           [
             randomUUID(),
             item.id,
@@ -553,6 +705,16 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
             cost.version,
             cost.total,
             JSON.stringify(parts),
+            JSON.stringify({
+              quantity: item.quantity,
+              bundleQuantity: item.bundle_quantity,
+              productId: item.product_id,
+              sku: item.sku,
+              orderedAt: item.ordered_at,
+              country: item.customer_country,
+              supplierId: item.supplier_id,
+              batch: item.supplier_batch,
+            }),
           ],
         );
         calculated += result.rows.length;
@@ -642,6 +804,9 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
       break;
     }
     case "consume": {
+      await tx.exec(
+        "LOCK TABLE prepaid_consumption IN SHARE ROW EXCLUSIVE MODE",
+      );
       const pool = await one<{
         product_id: string;
         purchased_quantity: number;
@@ -652,6 +817,15 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
         "SELECT * FROM prepaid_cost_pools WHERE id=$1 AND store_id=$2 AND currency=$3 AND legal_entity_id=$4 FOR UPDATE",
         [v.poolId, c.storeId, c.currency, c.entityId],
       );
+      const duplicate = await tx.query(
+        "SELECT c.id FROM prepaid_consumption c JOIN prepaid_cost_pools p ON p.id=c.pool_id JOIN prepaid_cost_pools target ON target.id=$2 WHERE c.order_item_id=$1 AND p.component=target.component",
+        [v.itemId, v.poolId],
+      );
+      if (duplicate.rows.length)
+        throw new HttpError(
+          409,
+          "This order component already has a prepaid allocation",
+        );
       const item = await one<{ quantity: number }>(
         tx,
         "SELECT i.quantity FROM order_items i JOIN orders o ON o.id=i.order_id WHERE i.id=$1 AND i.product_id=$2 AND o.store_id=$3 AND o.currency=$4 AND o.legal_entity_id=$5",
@@ -921,6 +1095,9 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
           )
         ).rows;
         for (const line of lines) {
+          await tx.exec(
+            "LOCK TABLE inventory_snapshots IN SHARE ROW EXCLUSIVE MODE",
+          );
           const current = (
             await tx.query<{
               available: number | null;
@@ -961,8 +1138,10 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
       break;
     }
     case "meta-credit": {
-      const aid = "manual-meta-" + c.storeId + "-" + c.currency,
-        bid = "manual-billing-" + c.storeId + "-" + c.currency;
+      const aid =
+          "manual-meta-" + c.storeId + "-" + c.entityId + "-" + c.currency,
+        bid =
+          "manual-billing-" + c.storeId + "-" + c.entityId + "-" + c.currency;
       await tx.query(
         "INSERT INTO ad_accounts(id,platform,store_id,legal_entity_id,currency) VALUES($1,'META',$2,$3,$4) ON CONFLICT(id) DO NOTHING",
         [aid, c.storeId, c.entityId, c.currency],
@@ -1040,6 +1219,8 @@ export async function executeOperation(tx: Sql, c: Command, actor: string) {
         v.platform.toLowerCase() +
         "-" +
         c.storeId +
+        "-" +
+        c.entityId +
         "-" +
         c.currency;
       await tx.query(

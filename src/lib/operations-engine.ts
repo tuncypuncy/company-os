@@ -37,10 +37,12 @@ export function prepaidAllocation(
     throw new Error("Invalid or exhausted prepaid pool");
   // Cumulative rounded allocation ensures final consumption exhausts exactly the original value.
   const before = purchased - remaining;
-  return (
-    Math.round((total * (before + consume)) / purchased) -
-    Math.round((total * before) / purchased)
-  );
+  const round = (n: number) =>
+    Number(
+      (BigInt(total) * BigInt(n) * 2n + BigInt(purchased)) /
+        (2n * BigInt(purchased)),
+    );
+  return round(before + consume) - round(before);
 }
 export type Inbound = { quantity: number; eta: string; status: string };
 export function stockForecast(
@@ -184,5 +186,79 @@ export function earlyPayment(input: {
         : usable >= need
           ? "Cash covers an early payment after buffer and scheduled liabilities"
           : "Do not recommend a payment that breaches the cash buffer",
+  };
+}
+
+export function reorderSuggestion(input: {
+  available: number | null;
+  daily: number | null;
+  leadDays: number;
+  safetyDays: number;
+  moq: number;
+  unitMinor: number;
+  freightMinor: number;
+  inbound: Inbound[];
+  asOf: string;
+}) {
+  if (
+    ![
+      input.leadDays,
+      input.safetyDays,
+      input.moq,
+      input.unitMinor,
+      input.freightMinor,
+    ].every(Number.isSafeInteger) ||
+    input.leadDays < 0 ||
+    input.safetyDays < 0 ||
+    input.moq <= 0 ||
+    input.unitMinor < 0 ||
+    input.freightMinor < 0
+  )
+    throw new Error("Invalid reorder assumptions");
+  if (input.available === null || input.daily === null)
+    return {
+      quantity: null,
+      cashRequired: null,
+      orderBy: null,
+      reason:
+        "Known available inventory and mapped sales velocity are required",
+    };
+  const target = input.daily * (input.leadDays + input.safetyDays),
+    end =
+      Date.parse(input.asOf) + (input.leadDays + input.safetyDays) * 86400000;
+  const arrivals = input.inbound
+    .filter(
+      (i) =>
+        !["CANCELLED", "AVAILABLE"].includes(i.status) &&
+        Date.parse(i.eta) >= Date.parse(input.asOf) &&
+        Date.parse(i.eta) <= end,
+    )
+    .reduce((n, i) => n + i.quantity, 0);
+  const quantity = Math.max(
+      0,
+      Math.ceil((target - input.available - arrivals) / input.moq) * input.moq,
+    ),
+    cost = quantity ? quantity * input.unitMinor + input.freightMinor : 0;
+  if (!Number.isSafeInteger(cost)) throw new Error("Reorder amount overflow");
+  const stockout = stockForecast(
+    input.available,
+    input.daily,
+    input.inbound,
+    input.asOf,
+  ).stockoutAt;
+  return {
+    quantity,
+    cashRequired: cost,
+    orderBy: stockout
+      ? new Date(
+          Math.max(
+            Date.parse(input.asOf),
+            Date.parse(stockout) - input.leadDays * 86400000,
+          ),
+        ).toISOString()
+      : null,
+    reason: quantity
+      ? "Review supplier availability, terms and cash before creating a purchase"
+      : "Current stock plus eligible inbound covers the entered planning horizon",
   };
 }

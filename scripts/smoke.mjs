@@ -177,7 +177,8 @@ await mkdir(artifacts, { recursive: true });
     .getByRole("button", { name: "Can we scale?", exact: true })
     .click();
   await page.getByLabel("Proposed Meta spend / day").fill("70000");
-  await page.getByText("Incomplete inputs", { exact: false }).waitFor();
+  await page.getByRole("button", { name: "Calculate scenario" }).click();
+  await page.getByText("INCOMPLETE INPUTS", { exact: false }).waitFor();
   await page.screenshot({
     path: path.join(artifacts, "scenario.png"),
     fullPage: true,
@@ -185,9 +186,11 @@ await mkdir(artifacts, { recursive: true });
   await page
     .getByRole("button", { name: "Inventory & supply", exact: true })
     .click();
-  await page.getByText("The inventory layer is ready to connect.").waitFor();
+  await page.getByRole("heading", { name: "Inventory coverage" }).waitFor();
   await page.getByRole("button", { name: "Connections", exact: true }).click();
-  await page.getByRole("heading", { name: "Shopify", exact: true }).waitFor();
+  await page
+    .getByRole("button", { name: "Configure Shopify", exact: true })
+    .waitFor();
   await page.selectOption("#store", "faucet");
   await page.getByRole("button", { name: "Overview", exact: true }).click();
   await page.getByText("Performance, without the noise.").waitFor();

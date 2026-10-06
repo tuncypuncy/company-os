@@ -178,7 +178,8 @@ export async function syncConnection(
         } while (after);
         after = undefined;
         pages = 0;
-        let budget = 0;
+        let budget = 0,
+          budgetComplete = true;
         do {
           if (++pages > 200)
             throw new IntegrationError(
@@ -190,17 +191,25 @@ export async function syncConnection(
             await actorTransaction(actor, (tx) =>
               rawSource(tx, id, "ADSET", adset.id, adset),
             );
-            if (adset.status === "ACTIVE" && adset.daily_budget)
-              budget += Number(adset.daily_budget);
+            if (adset.status === "ACTIVE") {
+              if (
+                !adset.daily_budget ||
+                !Number.isSafeInteger(Number(adset.daily_budget)) ||
+                Number(adset.daily_budget) < 0
+              )
+                budgetComplete = false;
+              else budget += Number(adset.daily_budget);
+            }
           }
           after = page.paging?.next ? page.paging.cursors?.after : undefined;
         } while (after);
         if (!Number.isSafeInteger(budget))
           throw new IntegrationError("PAYLOAD", "Invalid Meta budget");
-        await db.query(
-          "INSERT INTO ad_budgets(id,account_id,daily_minor,effective_at,source) VALUES($1,$2,$3,now(),'META_ACTIVE_ADSET_SUM')",
-          [randomUUID(), aid, budget],
-        );
+        if (budgetComplete)
+          await db.query(
+            "INSERT INTO ad_budgets(id,account_id,daily_minor,effective_at,source) VALUES($1,$2,$3,now(),'META_ACTIVE_ADSET_SUM')",
+            [randomUUID(), aid, budget],
+          );
       }
     } else {
       const adapter = new CJAdapter(cjConfig.parse(config), token);

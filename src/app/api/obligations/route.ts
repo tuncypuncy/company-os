@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { actorTransaction, appMode } from "@/lib/db";
 import { requireUser, errorResponse, HttpError, sameOrigin } from "@/lib/auth";
+import { recordPayment } from "@/lib/payments";
 import { obligationSchema } from "@/lib/validation";
 export const runtime = "nodejs";
 const restricted = [
@@ -78,38 +79,15 @@ export async function PATCH(request: Request) {
       .object({ id: z.string().min(1), action: z.literal("record-paid") })
       .safeParse(await jsonBody(request));
     if (!parsed.success) throw new HttpError(400, "Invalid payment record");
-    await actorTransaction(user.id, async (tx) => {
-      const result = await tx.query<{
-        category: string;
-        scope: string;
-        status: string;
-        invoice_id: string | null;
-      }>(
-        "SELECT category,scope,status,invoice_id FROM obligations WHERE id=$1 FOR UPDATE",
-        [parsed.data.id],
-      );
-      const record = result.rows[0];
-      if (!record) throw new HttpError(404, "Payment obligation not found");
-      if (
-        (record.scope === "PERSONAL" || restricted.includes(record.category)) &&
-        user.role !== "OWNER"
-      )
-        throw new HttpError(403, "Owner permission required");
-      if (record.status !== "SCHEDULED")
-        throw new HttpError(
-          409,
-          "This obligation has already been settled or cancelled",
-        );
-      await tx.query(
-        "UPDATE obligations SET status='PAID',paid_at=now(),updated_at=now() WHERE id=$1",
-        [parsed.data.id],
-      );
-      if (record.invoice_id)
-        await tx.query(
-          "UPDATE invoices SET status='PAID',payment_date=current_date,updated_at=now() WHERE id=$1",
-          [record.invoice_id],
-        );
-    });
+    await actorTransaction(user.id, (tx) =>
+      recordPayment(tx, {
+        id: parsed.data.id,
+        paidAt: new Date().toISOString(),
+        reference: "manual-full-" + randomUUID(),
+        actor: user.id,
+        owner: user.role === "OWNER",
+      }),
+    );
     return Response.json({ ok: true });
   } catch (e) {
     return errorResponse(e);

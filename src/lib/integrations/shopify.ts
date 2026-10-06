@@ -28,6 +28,7 @@ export type ShopifyOrder = {
   createdAt: string;
   updatedAt: string;
   cancelledAt: string | null;
+  displayFinancialStatus?: string;
   subtotalPriceSet: { shopMoney: Money };
   totalDiscountsSet: { shopMoney: Money };
   totalShippingPriceSet: { shopMoney: Money };
@@ -130,7 +131,7 @@ export class ShopifyAdapter {
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
       };
     }>(
-      "query Orders($cursor:String,$filter:String!){orders(first:50,after:$cursor,query:$filter,sortKey:UPDATED_AT){nodes{id name createdAt updatedAt cancelledAt subtotalPriceSet{shopMoney{amount currencyCode}} totalDiscountsSet{shopMoney{amount currencyCode}} totalShippingPriceSet{shopMoney{amount currencyCode}} lineItems(first:100){nodes{id quantity sku variant{id product{id title}}} pageInfo{hasNextPage endCursor}} refunds{id createdAt totalRefundedSet{shopMoney{amount currencyCode}}}} pageInfo{hasNextPage endCursor}}}",
+      "query Orders($cursor:String,$filter:String!){orders(first:50,after:$cursor,query:$filter,sortKey:UPDATED_AT){nodes{id name createdAt updatedAt cancelledAt displayFinancialStatus subtotalPriceSet{shopMoney{amount currencyCode}} totalDiscountsSet{shopMoney{amount currencyCode}} totalShippingPriceSet{shopMoney{amount currencyCode}} lineItems(first:100){nodes{id quantity sku variant{id product{id title}}} pageInfo{hasNextPage endCursor}} refunds{id createdAt totalRefundedSet{shopMoney{amount currencyCode}}}} pageInfo{hasNextPage endCursor}}}",
       { cursor, filter: "updated_at:>=" + since },
     );
     for (const order of result.orders.nodes) {

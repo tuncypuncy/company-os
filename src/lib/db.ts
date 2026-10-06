@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { postgresConfig } from "./postgres-config";
 import { readFile, mkdir } from "node:fs/promises";
 import path from "node:path";
+import { seedDemoOperations } from "./demo-operations";
 import { seedDemo } from "./seed";
 export type QueryResult<T> = { rows: T[] };
 export interface Sql {
@@ -38,23 +39,27 @@ export async function migrate(db: Database) {
     "004_operations",
     "005_inventory",
     "006_reporting",
+    "007_integrity",
+    "008_settlement",
+    "009_expense_evidence",
   ]) {
-    const exists = await db.query(
-      "SELECT version FROM schema_migrations WHERE version=$1",
-      [version],
-    );
-    if (!exists.rows.length)
-      await db.transaction(async (tx) => {
-        await tx.exec(
-          await readFile(
-            path.join(process.cwd(), `db/migrations/${version}.sql`),
-            "utf8",
-          ),
-        );
-        await tx.query("INSERT INTO schema_migrations(version) VALUES($1)", [
-          version,
-        ]);
-      });
+    await db.transaction(async (tx) => {
+      await tx.exec("LOCK TABLE schema_migrations IN EXCLUSIVE MODE");
+      const exists = await tx.query(
+        "SELECT version FROM schema_migrations WHERE version=$1",
+        [version],
+      );
+      if (exists.rows.length) return;
+      await tx.exec(
+        await readFile(
+          path.join(process.cwd(), `db/migrations/${version}.sql`),
+          "utf8",
+        ),
+      );
+      await tx.query("INSERT INTO schema_migrations(version) VALUES($1)", [
+        version,
+      ]);
+    });
   }
 }
 async function connect(): Promise<Database> {
@@ -79,6 +84,7 @@ async function connect(): Promise<Database> {
     };
     await migrate(db);
     await seedDemo(db);
+    await seedDemoOperations(db);
     return db;
   }
   if (!process.env.DATABASE_URL)

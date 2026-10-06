@@ -52,7 +52,7 @@ export async function POST(request: Request) {
         status: string;
         scope: string;
       }>(
-        "SELECT * FROM obligations WHERE store_id=$1 AND currency=$2 AND ($3::text IS NULL OR legal_entity_id=$3)",
+        "SELECT o.*,(o.amount_minor-COALESCE((SELECT sum(p.amount_minor) FROM obligation_payments p WHERE p.obligation_id=o.id),0)) AS amount_minor FROM obligations o WHERE store_id=$1 AND currency=$2 AND ($3::text IS NULL OR legal_entity_id=$3)",
         [v.storeId, v.currency, v.entityId ?? null],
       )
     ).rows;

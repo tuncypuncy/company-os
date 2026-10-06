@@ -67,8 +67,8 @@ export async function POST(request: Request) {
         id: string;
         password_hash: string | null;
       }>(
-        "SELECT id,password_hash FROM users WHERE email=$1 AND active=true AND is_demo=false",
-        [email],
+        "SELECT id,password_hash FROM users WHERE email=$1 AND active=true AND (is_demo=false OR $2=true)",
+        [email, appMode() === "demo"],
       );
       const user = result.rows[0];
       const valid = verifyPassword(

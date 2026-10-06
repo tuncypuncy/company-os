@@ -1,29 +1,23 @@
-# V0.1 validation — 2026-10-06
+# Validation — 2026-10-06
 
-## Passed
+## Verified
 
-- Repeatable install via scripts/install.sh: locked npm ci, PostgreSQL migrations, tests, production build.
-- 13 calculation/database/private-storage/TLS configuration test cases: all passed, none skipped. Database assertions also exercise the workspace aggregation with real PostgreSQL driver date values and missing-currency coverage.
-- TypeScript check and optimized Next.js production build.
-- Chromium browser smoke against the production server: demo session, unauthenticated/cross-origin rejection, request size/JSON validation, both store themes, invoice PNG upload/confirmation, persistence after reload, private attachment download, one linked obligation, personal owner tax record, payment recording, cash snapshot, interactive scaling, unavailable inventory/connections, mobile navigation and no page overflow.
-- Password login and incorrect-password rejection using an explicitly fictional Operations Manager test account. Owner-only balance/tax writes are rejected for Ops; private payroll/personal obligation details are excluded from Ops workspace responses.
-- Separate live-mode startup: demo login rejected and password login UI shown. No live database was supplied or contacted.
-- Production dependency audit: zero reported vulnerabilities at the check time. This is a point-in-time dependency result, not a general security guarantee.
-- Local documentation links and git diff whitespace check.
+- 27 financial, database, operation, provider-contract, private-storage, TLS, FX, extraction-proposal and reorder tests: passed, zero skipped. Operation cases cover recurring month-end/idempotence/cancellation, immutable cost snapshots, supplier-specific historical rules, refund review/recovery bounds, reconciliation revisions/control totals, prepaid exhaustion, exactly-once stock receipt, payroll privacy, imported-order deduplication, partial payment control totals and group/date reporting.
+- TypeScript and optimized Next.js production build passed.
+- Real native PostgreSQL 17 with trusted local test TLS passed all nine repeatable migrations, real driver dates, live-mode demo isolation, transaction rollback and actor audits. Runtime permission-group SQL executed; runtime audit deletion and migration writes were denied.
+- Production-server Chromium baseline test passed: unauthenticated/cross-origin rejection, both brand themes, reviewed invoice upload/persistence/download, owner tax/payment/balance records, password login/failure, Ops permission/privacy boundaries, inventory/scenario pages and mobile navigation/no page overflow.
+- Extended production-server browser test passed: subscription entry/generation, lineage, physical stock/inbound receipt/duplicate rejection/US filtering, partial payment and outstanding balance, FX, saved combined scenarios, missing-credential connection errors, audits, group/brand reports and mobile layout.
+- Actual local PNG OCR, text PDF extraction and scanned-PDF rasterization/OCR passed with browser-generated fictional documents. Proposals remained UNREVIEWED. Expense receipt upload/private download/content deduplication passed.
+- Production dependency audit reported zero vulnerabilities at the check time. This is a point-in-time result.
+- Live-mode local HTTP webhook fixture passed raw-body HMAC/shop/topic rejection, durable duplicate prevention and disabled demo entry. It did not contact Shopify.
+- Private Supabase SDK behavior is fixture-tested, including private-bucket validation, immutable object locations and cleanup.
 
-## Not verified / not implemented
+All mutation tests used isolated fictional records. Native PostgreSQL was a local Docker fixture, not the user's Supabase project. Browser screenshots contain DEMO data, not live books.
 
-External PostgreSQL/Supabase connectivity, real user provisioning against an external DB, live object storage, Shopify/Meta/CJ APIs, webhooks, OCR, live financial reconciliation, full inventory forecasts, exact scaling funding needs, live tax/payroll calculations, production deployment, environment publication and restoration in a new task.
+## Unverified / remaining
 
-Desktop screenshots are captured from the real running app with clearly labeled fictional DEMO data:
+Actual Supabase project/storage, installed Shopify GraphQL schema and scopes, Meta account access, CJ current official endpoint/profile and token lifecycle, real signed webhook delivery, live financial reconciliation, production hosting/backups/restore/monitoring, environment draft publication and restoration. Tax treatment/deadline computation, MFA/password recovery, provider payouts/fees and bank feeds are not implemented.
 
-- [Godisabove](screenshots/godisabove.png)
-- [Godisabove USA](screenshots/godisabove-usa.png)
+## Browser evidence
 
-Browser smoke fixtures and their generated records are fictional and isolated from live mode. The demo app is left running locally; live processes will need restarting after environment restoration. Installation/start instructions were saved in the environment draft; the user still needs to review/save and publish it.
-
-## Live foundation follow-up
-
-Migration 003 and isolated demo invoice upload/download passed the production browser smoke. The official Supabase SDK contract tests validate public-bucket rejection, upload/download/removal, immutable bucket location and traversal rejection using fictional HTTP responses. They do not contact Supabase. `APP_MODE=live npm run live:check` exited 1 as expected with no project credentials/public origin; external readiness remains blocked. Verified-TLS configuration, secure bootstrap account validation, private storage adapter and setup documentation are implemented.
-
-Actual pg client configuration parsing was checked without opening a network connection: insecure SSL URL overrides and search_path overrides cannot defeat verified TLS or the application schema.
+The screenshots under screenshots/ are real rendered fictional demo workflows. Godisabove uses yellow and Godisabove USA lavender; mobile layouts were checked at 390 pixels. Latest extended screenshots are also produced by scripts/operations-smoke.mjs under SMOKE_ARTIFACTS_DIR. Commands and safety boundaries are in README.md. Exact live steps are in INTEGRATION_SETUP.md.
