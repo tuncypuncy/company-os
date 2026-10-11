@@ -45,3 +45,7 @@ External production deployment still needs backups/restore testing, monitoring, 
 ## Persistent knowledge
 
 Read [AGENTS.md](AGENTS.md), [business context](docs/BUSINESS_CONTEXT.md), [financial rules](docs/FINANCIAL_RULES.md), [catalog](docs/PRODUCT_CATALOG.md), [entity map](docs/ENTITY_MAP.md), [integrations](docs/INTEGRATIONS.md), [data dictionary](docs/DATA_DICTIONARY.md), [decisions](docs/DECISIONS.md), [design system](docs/DESIGN_SYSTEM.md) and [validation](docs/VALIDATION.md). MASTER_SPECIFICATION_V2.md is the preserved authoritative backlog, subject to newer owner instructions.
+
+## Manual production setup workflow
+
+[GitHub Actions live setup](docs/GITHUB_LIVE_SETUP.md) runs only when manually dispatched on main, using separate migration/runtime credentials. It applies existing migrations/runtime grants, verifies or creates the private bucket and initial owner without resetting existing records, then runs live:check. The guide contains one complete GitHub secret list and the exact settings/run screens. The confirmed application origin is https://company-os-eight-iota.vercel.app.

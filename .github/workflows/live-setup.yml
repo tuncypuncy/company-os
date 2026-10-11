@@ -1,0 +1,46 @@
+name: Company OS live setup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: company-os-live-setup
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Use Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Prepare live database, private bucket, owner and readiness
+        run: node --import tsx scripts/github-live-setup.ts
+        env:
+          APP_MODE: live
+          APP_ORIGIN: https://company-os-eight-iota.vercel.app
+          PRIVATE_STORAGE_PROVIDER: supabase
+          SUPABASE_STORAGE_BUCKET: company-os-invoices
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_CA_CERT: ${{ secrets.DATABASE_CA_CERT }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BOOTSTRAP_EMAIL: ${{ secrets.BOOTSTRAP_EMAIL }}
+          BOOTSTRAP_NAME: ${{ secrets.BOOTSTRAP_NAME }}
+          BOOTSTRAP_PASSWORD: ${{ secrets.BOOTSTRAP_PASSWORD }}
+          BOOTSTRAP_ROLE: OWNER

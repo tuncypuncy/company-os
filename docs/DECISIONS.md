@@ -78,3 +78,7 @@ Group reporting uses currency-separated store totals and preserves per-store cas
 Integration access remains unverified. Incomplete Meta ad-set budget coverage is not published; CBO/lifetime budgeting needs an independently confirmed total. Imported Shopify fees/refund net basis require review before definitive profit. CJ uses a confirmed official profile only, because current official docs are network-blocked. See INTEGRATION_SETUP.md.
 
 Local OCR/text extraction uses trusted deployment binaries and bounded jobs, requires human confirmation, and never contacts an external extraction provider. Private expense receipts attach to existing expenses without another financial posting. Remaining deployment work includes backups/restore tests, monitoring, retention/orphan reconciliation and account-security extensions.
+
+## Manual production bootstrap — 2026-10-11
+
+The owner confirmed the Ready Vercel deployment origin https://company-os-eight-iota.vercel.app and requested a manual GitHub Actions setup instead of retrying Codex PostgreSQL networking. workflow_dispatch on main uses a separate privileged migration connection and a dedicated company_os_app runtime login. Existing owner credentials and bucket privacy policy are preserved or rejected for review; no demo seed or financial deletion occurs. Logs expose only stages/outcomes, not raw provider errors. See GITHUB_LIVE_SETUP.md. The workflow is implemented but actual GitHub/Supabase execution remains unverified until the owner supplies repository secrets and dispatches it.

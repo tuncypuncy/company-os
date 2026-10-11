@@ -39,3 +39,5 @@ The application has nine migrations, persistent demo PostgreSQL, verified-TLS li
 Current Next.js ships local version-specific guidance in `node_modules/next/dist/docs/`. Consult it when changing framework APIs. `agentRules: false` prevents the dev server from rewriting this file.
 
 Read docs/IMPLEMENTATION_STATUS.md before autonomous backlog work. Current operation definitions, validated transaction service, inventory/cash/Meta engines and integration contracts are implemented; do not replace working flows with placeholder cards. Commit reviewed source changes, not .data, credentials, build caches or temporary TLS fixtures. Native fixture validation is isolated from real books.
+
+Production bootstrap is .github/workflows/live-setup.yml plus scripts/github-live-setup.ts; see docs/GITHUB_LIVE_SETUP.md. Dispatch only from reviewed main with secure GitHub secrets. Preserve existing users, bucket privacy and all financial data; never print raw setup errors/SQL/connection URLs. Confirmed APP_ORIGIN is https://company-os-eight-iota.vercel.app. Do not retry Codex PostgreSQL network configuration for this workflow.
