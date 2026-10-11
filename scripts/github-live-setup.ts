@@ -14,7 +14,36 @@ import {
   postgresPasswordVerifier,
 } from "../src/lib/live-provisioning";
 
+import {
+  configurationResults,
+  connectWithDiagnostics,
+  safeErrorCodes,
+  requireVerifiedTls,
+  SetupError,
+} from "../src/lib/setup-diagnostics";
+
 let stage = "configuration";
+function enter(next: string) {
+  stage = next;
+  console.log("STAGE: " + stage);
+}
+function report(error: unknown, phase = stage) {
+  console.error(
+    "FAIL: stage=" + phase + " codes=" + safeErrorCodes(error).join(","),
+  );
+}
+async function connect(pool: Pool, kind: string) {
+  return connectWithDiagnostics(
+    () => pool.connect(),
+    () => enter(kind + " TLS handshake"),
+  );
+}
+function observe(pool: Pool, kind: string) {
+  pool.on("error", (error) => {
+    report(error, kind + " idle connection");
+    process.exitCode = 1;
+  });
+}
 let admin: Pool | undefined,
   runtime: Pool | undefined,
   caPath: string | undefined;
@@ -41,7 +70,7 @@ function database(pool: Pool): Database {
         await client.query("COMMIT");
         return result;
       } catch (e) {
-        await client.query("ROLLBACK");
+        await client.query("ROLLBACK").catch(() => {});
         throw e;
       } finally {
         client.release();
@@ -50,22 +79,18 @@ function database(pool: Pool): Database {
   };
 }
 async function main() {
-  if (
-    process.env.APP_MODE !== "live" ||
-    process.env.APP_ORIGIN !== "https://company-os-eight-iota.vercel.app" ||
-    process.env.PRIVATE_STORAGE_PROVIDER !== "supabase"
-  )
-    throw new Error("Explicit live configuration required");
-  for (const key of [
-    "DATABASE_MIGRATION_URL",
-    "DATABASE_URL",
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "BOOTSTRAP_EMAIL",
-    "BOOTSTRAP_NAME",
-  ])
-    if (!process.env[key]?.trim())
-      throw new Error("Required configuration missing");
+  const validation = configurationResults(process.env);
+  for (const result of validation)
+    console.log(
+      "CONFIG: " +
+        result.setting +
+        " check=" +
+        result.check +
+        " result=" +
+        result.result,
+    );
+  if (validation.some((result) => result.result === "FAIL"))
+    throw new SetupError("CONFIG_INVALID");
   const targets = setupTargets(
     process.env.DATABASE_MIGRATION_URL!,
     process.env.DATABASE_URL!,
@@ -86,13 +111,26 @@ async function main() {
     await writeFile(caPath, ca, { mode: 0o600 });
     process.env.DATABASE_CA_FILE = caPath;
   }
+  enter("admin connection");
   admin = new Pool(postgresConfig(process.env.DATABASE_MIGRATION_URL!, ca));
+  observe(admin, "admin");
   const adminDb = database(admin);
   // Session lock also protects independently dispatched runs on the same database.
-  const lock = await admin.connect();
+  const lock = await connect(admin, "admin");
   try {
+    console.log("PASS: admin connection established.");
+    enter("admin TLS");
+    requireVerifiedTls(
+      (
+        lock as unknown as {
+          connection: { stream: { encrypted?: boolean; authorized?: boolean } };
+        }
+      ).connection.stream,
+    );
+    console.log("PASS: admin TLS encryption and certificate verification.");
+    enter("setup lock");
     await lock.query("SELECT pg_advisory_lock(763182940)");
-    stage = "existing-data preflight";
+    enter("existing-data preflight");
     const schema = (
       await admin.query("SELECT to_regclass('company_os.users') AS users")
     ).rows[0].users;
@@ -107,10 +145,10 @@ async function main() {
       throw new Error(
         "Existing demo accounts require manual review; nothing is deleted",
       );
-    stage = "migrations";
+    enter("migrations");
     await migrate(adminDb);
     console.log("PASS: existing migrations applied; no demo seed invoked.");
-    stage = "runtime permissions";
+    enter("runtime permissions");
     const role = (
       await admin.query(
         "SELECT rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolbypassrls FROM pg_roles WHERE rolname=$1",
@@ -175,27 +213,32 @@ async function main() {
     await admin.query(
       "GRANT company_os_runtime TO " + escapeIdentifier(targets.runtimeRole),
     );
+    enter("runtime connection");
     runtime = new Pool(postgresConfig(process.env.DATABASE_URL!, ca));
+    observe(runtime, "runtime");
     const runtimeDb = database(runtime);
-    const identityClient = await runtime.connect();
+    const identityClient = await connect(runtime, "runtime");
     try {
-      const identity = (
-        await identityClient.query("SELECT current_user AS name")
-      ).rows[0];
+      console.log("PASS: runtime connection established.");
+      enter("runtime TLS");
       const socket = (
         identityClient as unknown as {
           connection: { stream: { encrypted?: boolean; authorized?: boolean } };
         }
       ).connection.stream;
-      if (
-        identity.name !== targets.runtimeRole ||
-        socket.encrypted !== true ||
-        socket.authorized !== true
-      )
-        throw new Error("Runtime identity/TLS check failed");
+      requireVerifiedTls(socket);
+      console.log("PASS: runtime TLS encryption and certificate verification.");
+      enter("runtime identity");
+      const identity = (
+        await identityClient.query("SELECT current_user AS name")
+      ).rows[0];
+
+      if (identity.name !== targets.runtimeRole)
+        throw new SetupError("RUNTIME_IDENTITY_MISMATCH");
     } finally {
       identityClient.release();
     }
+    enter("runtime permission verification");
     if (
       (
         await runtime.query(
@@ -217,7 +260,7 @@ async function main() {
     console.log(
       "PASS: dedicated runtime login and restricted grants verified over TLS.",
     );
-    stage = "private bucket";
+    enter("private bucket");
     const supabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -238,14 +281,14 @@ async function main() {
       process.env.SUPABASE_STORAGE_BUCKET || "company-os-invoices",
     );
     console.log("PASS: private bucket and upload restrictions verified.");
-    stage = "owner";
+    enter("owner");
     const status = await ensureOwner(runtimeDb, owner);
     console.log(
       "PASS: owner " +
         status.toLowerCase() +
         "; existing credentials preserved.",
     );
-    stage = "live:check";
+    enter("live:check");
     // Do not pass deployment-only DB credentials or bootstrap secrets to this child.
     const childEnv = { ...process.env };
     delete childEnv.DATABASE_MIGRATION_URL;
@@ -261,7 +304,7 @@ async function main() {
       child.once("error", () => resolve(1));
       child.once("exit", (c) => resolve(c ?? 1));
     });
-    if (code !== 0) throw new Error("Readiness check failed");
+    if (code !== 0) throw new SetupError("READINESS_CHECK_FAILED");
     console.log("PASS: live:check completed using runtime credentials.");
   } finally {
     await lock.query("SELECT pg_advisory_unlock(763182940)").catch(() => {});
@@ -270,15 +313,18 @@ async function main() {
 }
 try {
   await main();
-} catch {
+} catch (error) {
+  report(error);
   console.error(
-    "Live setup failed at " +
-      stage +
-      ". Credential values and provider errors are withheld. Review that stage's configuration and permissions; completed migrations are retained.",
+    "Completed migrations are retained; raw errors and connection addresses are withheld.",
   );
   process.exitCode = 1;
 } finally {
   await runtime?.end().catch(() => {});
   await admin?.end().catch(() => {});
-  if (caPath) await rm(caPath, { force: true });
+  if (caPath)
+    await rm(caPath, { force: true }).catch((error) => {
+      report(error, "temporary CA cleanup");
+      process.exitCode = 1;
+    });
 }

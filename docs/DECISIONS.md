@@ -82,3 +82,10 @@ Local OCR/text extraction uses trusted deployment binaries and bounded jobs, req
 ## Manual production bootstrap — 2026-10-11
 
 The owner confirmed the Ready Vercel deployment origin https://company-os-eight-iota.vercel.app and requested a manual GitHub Actions setup instead of retrying Codex PostgreSQL networking. workflow_dispatch on main uses a separate privileged migration connection and a dedicated company_os_app runtime login. Existing owner credentials and bucket privacy policy are preserved or rejected for review; no demo seed or financial deletion occurs. Logs expose only stages/outcomes, not raw provider errors. See GITHUB_LIVE_SETUP.md. The workflow is implemented but actual GitHub/Supabase execution remains unverified until the owner supplies repository secrets and dispatches it.
+
+- 2026-10-11: Live setup reports all local configuration checks without values,
+  separates admin/runtime connection and verified TLS stages, and allowlists error
+  codes (including nested storage errors). Raw messages, SQL, addresses and stacks
+  remain suppressed. A new main workflow dispatch is required to pick up fixes;
+  re-running an old run retains old code. No networking policy changes or live data
+  deletion are part of this diagnostic revision.

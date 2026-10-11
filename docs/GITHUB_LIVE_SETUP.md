@@ -52,3 +52,41 @@ If a CA file is needed, provide trusted CA content through the hosting-supported
 A passing GitHub live:check proves database/owner/private-bucket readiness from that runner. It does not prove the deployed Vercel process has the new variables, successful interactive login, attachment upload/download, commerce integration access or backups. Test those after redeployment. No live setup has been executed from Codex.
 
 Validation: 31 local tests passed, TypeScript and workflow YAML/manual-trigger/permission checks passed. Native PostgreSQL 17 accepted all migration SQL, authenticated the SCRAM runtime login, and verified runtime grants/audit protections in a disposable fictional fixture. These checks do not establish actual Supabase/GitHub execution.
+
+### Safe diagnostics (revised workflow)
+
+Start **Actions → Company OS live setup → Run workflow → Branch: main** after
+pulling the latest workflow commit. Do not use **Re-run jobs** on old runs
+(including `38143486163`): GitHub reuses their old commit and diagnostic code.
+No new secrets are required for this revision.
+
+Each `CONFIG` line reports a fixed setting name, check name and
+`PASS` / `FAIL` / `OPTIONAL_UNSET`, never the supplied value. All local validation
+results are printed before any database connection. A missing bootstrap password
+is optional only when a valid owner already exists; creation still requires it.
+Service key presence/format does not claim successful authentication. Optional CA
+syntax is checked locally; trust is verified during the TLS handshake.
+
+`STAGE` identifies admin connection, admin TLS verification, setup lock,
+existing-data preflight, migrations, runtime permissions, runtime connection,
+runtime TLS verification, runtime identity, runtime permission verification,
+private bucket, owner and live:check. A failed TLS handshake with a recognized TLS
+code is reported as `admin TLS handshake` or `runtime TLS handshake`. Connection
+establishment includes the PostgreSQL protocol/authentication handshake; no
+separate plaintext connection is attempted and certificate verification stays on.
+
+`FAIL` only emits the stage and allowlisted codes. Examples: `28P01` means
+PostgreSQL rejected authentication; `42501` means insufficient database privilege;
+`ENOTFOUND` / `EAI_AGAIN` means name resolution failed; `ECONNREFUSED` /
+`ETIMEDOUT` indicates connectivity; `CERT_HAS_EXPIRED`,
+`UNABLE_TO_VERIFY_LEAF_SIGNATURE` and `ERR_TLS_CERT_ALTNAME_INVALID` indicate TLS
+verification failures. `HTTP_401` / `HTTP_403` indicates storage authentication /
+authorization failure. Nested causes and aggregate connection failures are
+inspected with bounded depth. Unknown codes are reported as `UNKNOWN_ERROR`;
+messages, stacks, SQL details, URLs, hosts, usernames and provider payloads are
+never printed. `TLS_NOT_ENCRYPTED` / `TLS_NOT_AUTHORIZED` rejects an unsafe socket;
+`RUNTIME_IDENTITY_MISMATCH` rejects the wrong runtime login.
+`READINESS_CHECK_FAILED` indicates the isolated, output-suppressed live:check
+failed. Business guard failures without a provider code remain `UNKNOWN_ERROR`
+with their precise stage; manually review that stage without enabling raw error
+logging. Completed migrations and live records are retained on failure.

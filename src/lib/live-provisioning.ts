@@ -188,7 +188,9 @@ export async function ensurePrivateBucket(storage: StorageAdmin, id: string) {
     statusCode?: string | number;
   };
   if (Number(error.status ?? error.statusCode) !== 404)
-    throw new Error("Storage access failed; no bucket created");
+    throw new Error("Storage access failed; no bucket created", {
+      cause: found.error,
+    });
   const created = await storage.createBucket(id, {
     public: false,
     fileSizeLimit: 10 * 1024 * 1024,
@@ -199,6 +201,7 @@ export async function ensurePrivateBucket(storage: StorageAdmin, id: string) {
   if (check.error)
     throw new Error(
       created.error ? "Bucket creation failed" : "Bucket verification failed",
+      { cause: created.error || check.error },
     );
   validBucket(check.data);
   return "CREATED";

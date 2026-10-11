@@ -28,7 +28,7 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
         env:
           NEXT_TELEMETRY_DISABLED: "1"
-      - name: Prepare live database, private bucket, owner and readiness
+      - name: Validate configuration and run live setup with safe diagnostics
         run: node --import tsx scripts/github-live-setup.ts
         env:
           APP_MODE: live
